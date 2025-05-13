@@ -109,7 +109,7 @@ def main():
     train_losses, train_accs = [], []
     val_losses, val_accs = [], []
 
-    EPOCHS = 3  # Increase for real training
+    EPOCHS = 15  # Increase for real training
     for epoch in range(EPOCHS):
         log(f"\n[Telemetry] Starting epoch {epoch+1}/{EPOCHS}")
         resnet34.train()

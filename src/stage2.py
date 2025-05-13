@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 # Choose strategy: 'simultaneous' or 'gradual'
 STRATEGY = 'simultaneous'  # or 'gradual'
 L = 2  # Number of last layers to fine-tune in 'simultaneous' mode
-EPOCHS = 3  # For demonstration; increase for real training
+EPOCHS = 15  # For demonstration; increase for real training
 BATCH_SIZE = 32
 
 # Logging setup

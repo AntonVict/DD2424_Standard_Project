@@ -11,6 +11,7 @@ import datetime
 import random
 from collections import defaultdict, Counter
 import matplotlib.pyplot as plt
+import numpy as np
 
 # ====== SETTINGS ======
 EPOCHS = 3  # For demonstration; increase for real training
@@ -21,8 +22,10 @@ CAT_KEEP_FRAC = 0.2  # Keep only 20% of cat images
 # Logging setup
 LOG_DIR = "logs"
 PLOT_DIR = os.path.join(LOG_DIR, "plots")
+MODEL_DIR = "models"
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(PLOT_DIR, exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
 pretty_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 LOG_FILE = os.path.join(LOG_DIR, f"logs-{pretty_timestamp}.log")
 RAW_RESULTS = "raw-results.md"
@@ -78,6 +81,19 @@ def accuracy(outputs, labels):
     preds = torch.argmax(outputs, dim=1)
     return (preds == labels).float().mean().item(), preds
 
+def plot_confusion_matrix(cm, classes, save_path):
+    plt.figure(figsize=(10, 8))
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    plt.title('Confusion Matrix')
+    plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=90, fontsize=6)
+    plt.yticks(tick_marks, classes, fontsize=6)
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches='tight')
+    plt.close()
 
 def main():
     # Paths
@@ -201,11 +217,26 @@ def main():
         acc = correct / total if total > 0 else 0.0
         log(f"  Class {label+1:2d}: {acc:.4f} ({correct}/{total})")
 
+    # Confusion matrix
+    cm = np.zeros((37, 37), dtype=int)
+    for t, p in zip(all_labels, all_preds):
+        cm[t, p] += 1
+    confmat_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-confmat.png")
+    plot_confusion_matrix(cm, [str(i+1) for i in range(37)], confmat_path)
+    log(f"[Telemetry] Confusion matrix saved to: {confmat_path}")
+
+    # Save model
+    model_path = os.path.join(MODEL_DIR, f"stage3-imbalance-{pretty_timestamp}.pt")
+    torch.save(resnet34.state_dict(), model_path)
+    log(f"[Telemetry] Model saved to: {model_path}")
+
     # Append to raw-results.md
     with open(RAW_RESULTS, "a") as f:
         f.write(f"\n\n## Stage 3 Imbalanced Classification Run ({pretty_timestamp})\n")
         f.write(f"![]({loss_plot_path})\n")
         f.write(f"![]({acc_plot_path})\n")
+        f.write(f"![]({confmat_path})\n")
+        f.write(f"\n**Model saved at:** `{model_path}`\n")
         f.write(f"\n**Log:**\n\n")
         with open(LOG_FILE) as logf:
             for line in logf:
