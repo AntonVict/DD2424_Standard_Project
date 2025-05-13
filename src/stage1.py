@@ -6,6 +6,20 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import torch.nn as nn
 import torch.optim as optim
+import sys
+import datetime
+
+# Logging setup
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+pretty_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+LOG_FILE = os.path.join(LOG_DIR, f"logs-{pretty_timestamp}.log")
+
+def log(msg):
+    msg = str(msg)
+    print(msg)
+    with open(LOG_FILE, "a") as f:
+        f.write(msg + "\n")
 
 # Custom Dataset for binary classification (cat vs. dog)
 class PetBinaryDataset(Dataset):
@@ -60,10 +74,10 @@ def main():
         device = torch.device("cpu")
 
     # Telemetry: Data and device info
-    print(f"[Telemetry] Number of training samples: {len(train_ds)}")
-    print(f"[Telemetry] Number of test samples: {len(test_ds)}")
-    print(f"[Telemetry] Batch size: {batch_size}")
-    print(f"[Telemetry] Using device: {device}")
+    log(f"[Telemetry] Number of training samples: {len(train_ds)}")
+    log(f"[Telemetry] Number of test samples: {len(test_ds)}")
+    log(f"[Telemetry] Batch size: {batch_size}")
+    log(f"[Telemetry] Using device: {device}")
 
     # Model
     resnet34 = models.resnet34(weights="IMAGENET1K_V1")
@@ -82,7 +96,7 @@ def main():
     # Training loop
     EPOCHS = 3  # Increase for real training
     for epoch in range(EPOCHS):
-        print(f"\n[Telemetry] Starting epoch {epoch+1}/{EPOCHS}")
+        log(f"\n[Telemetry] Starting epoch {epoch+1}/{EPOCHS}")
         resnet34.train()
         train_loss, train_acc, n = 0, 0, 0
         for batch_idx, (imgs, labels) in enumerate(train_dl):
@@ -96,8 +110,8 @@ def main():
             train_acc += accuracy(outputs, labels) * imgs.size(0)
             n += imgs.size(0)
             if (batch_idx + 1) % 100 == 0 or (batch_idx + 1) == len(train_dl):
-                print(f"[Telemetry][Epoch {epoch+1}] Batch {batch_idx+1}/{len(train_dl)} | Loss: {loss.item():.4f} | Acc: {accuracy(outputs, labels):.4f}")
-        print(f"[Telemetry] Epoch {epoch+1} | Train Loss: {train_loss/n:.4f} | Train Acc: {train_acc/n:.4f}")
+                log(f"[Telemetry][Epoch {epoch+1}] Batch {batch_idx+1}/{len(train_dl)} | Loss: {loss.item():.4f} | Acc: {accuracy(outputs, labels):.4f}")
+        log(f"[Telemetry] Epoch {epoch+1} | Train Loss: {train_loss/n:.4f} | Train Acc: {train_acc/n:.4f}")
 
         resnet34.eval()
         val_loss, val_acc, n = 0, 0, 0
@@ -109,7 +123,7 @@ def main():
                 val_loss += loss.item() * imgs.size(0)
                 val_acc += accuracy(outputs, labels) * imgs.size(0)
                 n += imgs.size(0)
-        print(f"[Telemetry] Epoch {epoch+1} | Val Loss: {val_loss/n:.4f} | Val Acc: {val_acc/n:.4f}")
+        log(f"[Telemetry] Epoch {epoch+1} | Val Loss: {val_loss/n:.4f} | Val Acc: {val_acc/n:.4f}")
 
 
 if __name__ == "__main__":
