@@ -1,0 +1,10 @@
+# Core requirements for transfer learning with PyTorch and torchvision
+# For best compatibility, use versions >= 2.0 for torch and >= 0.13 for torchvision
+
+torch>=2.0
+torchvision>=0.13
+# Optional: for Jupyter notebook support
+notebook
+# Optional: for data handling and visualization
+matplotlib
+pandas
