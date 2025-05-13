@@ -10,6 +10,7 @@ import sys
 import datetime
 import random
 from collections import defaultdict, Counter
+import matplotlib.pyplot as plt
 
 # ====== SETTINGS ======
 EPOCHS = 3  # For demonstration; increase for real training
@@ -19,9 +20,13 @@ CAT_KEEP_FRAC = 0.2  # Keep only 20% of cat images
 
 # Logging setup
 LOG_DIR = "logs"
+PLOT_DIR = os.path.join(LOG_DIR, "plots")
 os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(PLOT_DIR, exist_ok=True)
 pretty_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 LOG_FILE = os.path.join(LOG_DIR, f"logs-{pretty_timestamp}.log")
+RAW_RESULTS = "raw-results.md"
+PLOT_PREFIX = f"stage3-imbalance-{pretty_timestamp}"
 
 def log(msg):
     msg = str(msg)
@@ -114,6 +119,10 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(resnet34.parameters(), lr=1e-4)
 
+    # For plotting
+    train_losses, train_accs = [], []
+    val_losses, val_accs = [], []
+
     for epoch in range(EPOCHS):
         log(f"\n[Telemetry] Starting epoch {epoch+1}/{EPOCHS}")
         resnet34.train()
@@ -131,6 +140,8 @@ def main():
             n += imgs.size(0)
             if (batch_idx + 1) % 100 == 0 or (batch_idx + 1) == len(train_dl):
                 log(f"[Telemetry][Epoch {epoch+1}] Batch {batch_idx+1}/{len(train_dl)} | Loss: {loss.item():.4f} | Acc: {acc:.4f}")
+        train_losses.append(train_loss/n)
+        train_accs.append(train_acc/n)
         log(f"[Telemetry] Epoch {epoch+1} | Train Loss: {train_loss/n:.4f} | Train Acc: {train_acc/n:.4f}")
 
         resnet34.eval()
@@ -148,7 +159,33 @@ def main():
                 n += imgs.size(0)
                 all_labels.extend(labels.cpu().tolist())
                 all_preds.extend(preds.cpu().tolist())
+        val_losses.append(val_loss/n)
+        val_accs.append(val_acc/n)
         log(f"[Telemetry] Epoch {epoch+1} | Val Loss: {val_loss/n:.4f} | Val Acc: {val_acc/n:.4f}")
+
+    # Plotting
+    epochs = list(range(1, EPOCHS+1))
+    plt.figure()
+    plt.plot(epochs, train_losses, label='Train Loss')
+    plt.plot(epochs, val_losses, label='Val Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Loss')
+    plt.legend()
+    loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-loss.png")
+    plt.savefig(loss_plot_path)
+    plt.close()
+
+    plt.figure()
+    plt.plot(epochs, train_accs, label='Train Acc')
+    plt.plot(epochs, val_accs, label='Val Acc')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.title('Training and Validation Accuracy')
+    plt.legend()
+    acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-acc.png")
+    plt.savefig(acc_plot_path)
+    plt.close()
 
     # Per-class accuracy
     per_class_correct = Counter()
@@ -163,6 +200,16 @@ def main():
         correct = per_class_correct[label]
         acc = correct / total if total > 0 else 0.0
         log(f"  Class {label+1:2d}: {acc:.4f} ({correct}/{total})")
+
+    # Append to raw-results.md
+    with open(RAW_RESULTS, "a") as f:
+        f.write(f"\n\n## Stage 3 Imbalanced Classification Run ({pretty_timestamp})\n")
+        f.write(f"![]({loss_plot_path})\n")
+        f.write(f"![]({acc_plot_path})\n")
+        f.write(f"\n**Log:**\n\n")
+        with open(LOG_FILE) as logf:
+            for line in logf:
+                f.write(line)
 
 if __name__ == "__main__":
     main() 
