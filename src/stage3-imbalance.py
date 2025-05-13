@@ -39,7 +39,7 @@ def log(msg):
 
 # Custom Dataset for multi-class classification (breed recognition, with imbalance)
 class PetBreedImbalanceDataset(Dataset):
-    def __init__(self, data_dir, split_file, cat_keep_frac=1.0):
+    def __init__(self, data_dir, split_file, cat_keep_frac=1.0, indices=None):
         self.img_dir = os.path.join(data_dir, "images")
         self.samples = []  # list of (img_path, label, breed_id, species)
         breed_to_samples = defaultdict(list)
@@ -60,6 +60,8 @@ class PetBreedImbalanceDataset(Dataset):
                 self.samples.extend(random.sample(samples, k))
             else:
                 self.samples.extend(samples)
+        if indices is not None:
+            self.samples = [self.samples[i] for i in indices]
         self.tfms = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -100,11 +102,22 @@ def main():
     DATA_DIR = "dataset/oxford-iiit-pet"
     TRAIN_FILE = os.path.join(DATA_DIR, "annotations", "trainval.txt")
     TEST_FILE = os.path.join(DATA_DIR, "annotations", "test.txt")
-
+    # Split trainval.txt into train/val indices
+    with open(TRAIN_FILE) as f:
+        lines = [line for line in f if len(line.strip().split()) >= 4]
+    n_total = len(lines)
+    indices = list(range(n_total))
+    random.seed(42)
+    random.shuffle(indices)
+    split = int(0.8 * n_total)
+    train_indices = indices[:split]
+    val_indices = indices[split:]
     # Datasets and loaders
-    train_ds = PetBreedImbalanceDataset(DATA_DIR, TRAIN_FILE, cat_keep_frac=CAT_KEEP_FRAC)
+    train_ds = PetBreedImbalanceDataset(DATA_DIR, TRAIN_FILE, cat_keep_frac=CAT_KEEP_FRAC, indices=train_indices)
+    val_ds = PetBreedImbalanceDataset(DATA_DIR, TRAIN_FILE, cat_keep_frac=CAT_KEEP_FRAC, indices=val_indices)
     test_ds = PetBreedImbalanceDataset(DATA_DIR, TEST_FILE, cat_keep_frac=1.0)
     train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
+    val_dl = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
     test_dl = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
 
     # Device selection: CUDA > MPS > CPU
