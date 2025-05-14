@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # ====== SETTINGS ======
-EPOCHS = 3  # For demonstration; increase for real training
+EPOCHS = 15  # For demonstration; increase for real training
 BATCH_SIZE = 32
 CAT_BREED_IDS = set(range(1, 26))  # 1-25 are cat breeds
 CAT_KEEP_FRAC = 0.2  # Keep only 20% of cat images
@@ -39,7 +39,7 @@ def log(msg):
 
 # Custom Dataset for multi-class classification (breed recognition, with imbalance)
 class PetBreedImbalanceDataset(Dataset):
-    def __init__(self, data_dir, split_file, cat_keep_frac=1.0, indices=None):
+    def __init__(self, data_dir, split_file, cat_keep_frac=1.0, indices=None, build_full=False):
         self.img_dir = os.path.join(data_dir, "images")
         self.samples = []  # list of (img_path, label, breed_id, species)
         breed_to_samples = defaultdict(list)
@@ -102,10 +102,9 @@ def main():
     DATA_DIR = "dataset/oxford-iiit-pet"
     TRAIN_FILE = os.path.join(DATA_DIR, "annotations", "trainval.txt")
     TEST_FILE = os.path.join(DATA_DIR, "annotations", "test.txt")
-    # Split trainval.txt into train/val indices
-    with open(TRAIN_FILE) as f:
-        lines = [line for line in f if len(line.strip().split()) >= 4]
-    n_total = len(lines)
+    # Build the full filtered sample list first
+    full_train_ds = PetBreedImbalanceDataset(DATA_DIR, TRAIN_FILE, cat_keep_frac=CAT_KEEP_FRAC)
+    n_total = len(full_train_ds)
     indices = list(range(n_total))
     random.seed(42)
     random.shuffle(indices)
@@ -151,6 +150,7 @@ def main():
     # For plotting
     train_losses, train_accs = [], []
     val_losses, val_accs = [], []
+    test_losses, test_accs = [], []
 
     for epoch in range(EPOCHS):
         log(f"\n[Telemetry] Starting epoch {epoch+1}/{EPOCHS}")
@@ -173,8 +173,23 @@ def main():
         train_accs.append(train_acc/n)
         log(f"[Telemetry] Epoch {epoch+1} | Train Loss: {train_loss/n:.4f} | Train Acc: {train_acc/n:.4f}")
 
+        # Validation
         resnet34.eval()
         val_loss, val_acc, n = 0, 0, 0
+        with torch.no_grad():
+            for imgs, labels, breedids, species in val_dl:
+                imgs, labels = imgs.to(device), labels.to(device)
+                outputs = resnet34(imgs)
+                loss = criterion(outputs, labels)
+                acc, _ = accuracy(outputs, labels)
+                val_loss += loss.item() * imgs.size(0)
+                val_acc += acc * imgs.size(0)
+                n += imgs.size(0)
+        val_losses.append(val_loss/n)
+        val_accs.append(val_acc/n)
+        log(f"[Telemetry] Epoch {epoch+1} | Val Loss: {val_loss/n:.4f} | Val Acc: {val_acc/n:.4f}")
+        # Test set evaluation (per epoch)
+        test_loss, test_acc, n = 0, 0, 0
         all_labels = []
         all_preds = []
         with torch.no_grad():
@@ -183,23 +198,24 @@ def main():
                 outputs = resnet34(imgs)
                 loss = criterion(outputs, labels)
                 acc, preds = accuracy(outputs, labels)
-                val_loss += loss.item() * imgs.size(0)
-                val_acc += acc * imgs.size(0)
+                test_loss += loss.item() * imgs.size(0)
+                test_acc += acc * imgs.size(0)
                 n += imgs.size(0)
                 all_labels.extend(labels.cpu().tolist())
                 all_preds.extend(preds.cpu().tolist())
-        val_losses.append(val_loss/n)
-        val_accs.append(val_acc/n)
-        log(f"[Telemetry] Epoch {epoch+1} | Val Loss: {val_loss/n:.4f} | Val Acc: {val_acc/n:.4f}")
+        test_losses.append(test_loss/n)
+        test_accs.append(test_acc/n)
+        log(f"[Telemetry] Epoch {epoch+1} | Test Loss: {test_loss/n:.4f} | Test Acc: {test_acc/n:.4f}")
 
     # Plotting
     epochs = list(range(1, EPOCHS+1))
     plt.figure()
     plt.plot(epochs, train_losses, label='Train Loss')
     plt.plot(epochs, val_losses, label='Val Loss')
+    plt.plot(epochs, test_losses, label='Test Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
-    plt.title('Training and Validation Loss')
+    plt.title('Training, Validation, and Test Loss')
     plt.legend()
     loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-loss.png")
     plt.savefig(loss_plot_path)
@@ -208,9 +224,10 @@ def main():
     plt.figure()
     plt.plot(epochs, train_accs, label='Train Acc')
     plt.plot(epochs, val_accs, label='Val Acc')
+    plt.plot(epochs, test_accs, label='Test Acc')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
-    plt.title('Training and Validation Accuracy')
+    plt.title('Training, Validation, and Test Accuracy')
     plt.legend()
     acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-acc.png")
     plt.savefig(acc_plot_path)
