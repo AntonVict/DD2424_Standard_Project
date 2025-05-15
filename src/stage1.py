@@ -10,6 +10,7 @@ import sys
 import datetime
 import matplotlib.pyplot as plt
 import random
+from tqdm import tqdm
 
 # Logging setup
 LOG_DIR = "logs"
@@ -76,7 +77,7 @@ def main():
     indices = list(range(n_total))
     random.seed(42)
     random.shuffle(indices)
-    split = int(0.8 * n_total)
+    split = int(0.9 * n_total)
     train_indices = indices[:split]
     val_indices = indices[split:]
 
@@ -112,7 +113,13 @@ def main():
 
     # Loss and optimizer
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(resnet34.parameters(), lr=1e-4)
+
+    #change here if we want to train the entire network
+    for p in resnet34.parameters():
+        p.requires_grad = False
+
+    resnet34.fc = nn.Linear(num_ftrs, 1)
+    optimizer = optim.Adam(resnet34.fc.parameters(), lr=1e-4)
 
     def accuracy(outputs, labels):
         preds = (torch.sigmoid(outputs) > 0.5).float()
@@ -121,41 +128,64 @@ def main():
     # For plotting
     train_losses, train_accs = [], []
     val_losses, val_accs = [], []
+    interval_plot_steps = []
+    interval_train_losses, interval_train_accs = [], []
+    interval_val_losses, interval_val_accs = [], []
 
-    EPOCHS = 15  # Increase for real training
+    EPOCHS = 3  # Increase for real training
     for epoch in range(EPOCHS):
         log(f"\n[Telemetry] Starting epoch {epoch+1}/{EPOCHS}")
         resnet34.train()
         train_loss, train_acc, n = 0, 0, 0
-        for batch_idx, (imgs, labels) in enumerate(train_dl):
+        interval_loss, interval_acc, interval_n = 0, 0, 0
+        for batch_idx, (imgs, labels) in enumerate(tqdm(train_dl, total=len(train_dl))):
             imgs, labels = imgs.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = resnet34(imgs).squeeze(1)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+            # Accumulate for epoch
             train_loss += loss.item() * imgs.size(0)
             train_acc += accuracy(outputs, labels) * imgs.size(0)
             n += imgs.size(0)
-            if (batch_idx + 1) % 100 == 0 or (batch_idx + 1) == len(train_dl):
-                log(f"[Telemetry][Epoch {epoch+1}] Batch {batch_idx+1}/{len(train_dl)} | Loss: {loss.item():.4f} | Acc: {accuracy(outputs, labels):.4f}")
+            # Accumulate for interval
+            interval_loss += loss.item() * imgs.size(0)
+            interval_acc += accuracy(outputs, labels) * imgs.size(0)
+            interval_n += imgs.size(0)
+
+            # Every 10 batches, log interval train/val metrics
+            if (batch_idx + 1) % 20 == 0 or (batch_idx + 1) == len(train_dl):
+                avg_train_loss = interval_loss / interval_n if interval_n > 0 else 0
+                avg_train_acc = interval_acc / interval_n if interval_n > 0 else 0
+                log(f"[Telemetry][Epoch {epoch+1}] Batch {batch_idx+1}/{len(train_dl)} | Train Loss (last 10): {avg_train_loss:.4f} | Train Acc (last 10): {avg_train_acc:.4f}")
+                # Validation evaluation
+                resnet34.eval()
+                val_loss, val_acc, val_n = 0, 0, 0
+                with torch.no_grad():
+                    for v_imgs, v_labels in val_dl:
+                        v_imgs, v_labels = v_imgs.to(device), v_labels.to(device)
+                        v_outputs = resnet34(v_imgs).squeeze(1)
+                        v_loss = criterion(v_outputs, v_labels)
+                        val_loss += v_loss.item() * v_imgs.size(0)
+                        val_acc += accuracy(v_outputs, v_labels) * v_imgs.size(0)
+                        val_n += v_imgs.size(0)
+                avg_val_loss = val_loss / val_n if val_n > 0 else 0
+                avg_val_acc = val_acc / val_n if val_n > 0 else 0
+                log(f"[Telemetry][Epoch {epoch+1}] Batch {batch_idx+1}/{len(train_dl)} | Val Loss: {avg_val_loss:.4f} | Val Acc: {avg_val_acc:.4f}")
+                resnet34.train()
+                # Store interval metrics for plotting
+                interval_plot_steps.append(batch_idx + 1)
+                interval_train_losses.append(avg_train_loss)
+                interval_train_accs.append(avg_train_acc)
+                interval_val_losses.append(avg_val_loss)
+                interval_val_accs.append(avg_val_acc)
+                # Reset interval accumulators
+                interval_loss, interval_acc, interval_n = 0, 0, 0
+
         train_losses.append(train_loss/n)
         train_accs.append(train_acc/n)
         log(f"[Telemetry] Epoch {epoch+1} | Train Loss: {train_loss/n:.4f} | Train Acc: {train_acc/n:.4f}")
-
-        resnet34.eval()
-        val_loss, val_acc, n = 0, 0, 0
-        with torch.no_grad():
-            for imgs, labels in val_dl:
-                imgs, labels = imgs.to(device), labels.to(device)
-                outputs = resnet34(imgs).squeeze(1)
-                loss = criterion(outputs, labels)
-                val_loss += loss.item() * imgs.size(0)
-                val_acc += accuracy(outputs, labels) * imgs.size(0)
-                n += imgs.size(0)
-        val_losses.append(val_loss/n)
-        val_accs.append(val_acc/n)
-        log(f"[Telemetry] Epoch {epoch+1} | Val Loss: {val_loss/n:.4f} | Val Acc: {val_acc/n:.4f}")
 
     # Test set evaluation
     test_loss, test_acc, n = 0, 0, 0
@@ -170,24 +200,24 @@ def main():
     log(f"[Telemetry] Test Loss: {test_loss/n:.4f} | Test Acc: {test_acc/n:.4f}")
 
     # Plotting
-    epochs = list(range(1, EPOCHS+1))
+    # Plot interval-based metrics
     plt.figure()
-    plt.plot(epochs, train_losses, label='Train Loss')
-    plt.plot(epochs, val_losses, label='Val Loss')
-    plt.xlabel('Epoch')
+    plt.plot(interval_plot_steps, interval_train_losses, label='Train Loss (interval)')
+    plt.plot(interval_plot_steps, interval_val_losses, label='Val Loss (interval)')
+    plt.xlabel('Step')
     plt.ylabel('Loss')
-    plt.title('Training and Validation Loss')
+    plt.title('Training and Validation Loss (per interval)')
     plt.legend()
     loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-loss.png")
     plt.savefig(loss_plot_path)
     plt.close()
 
     plt.figure()
-    plt.plot(epochs, train_accs, label='Train Acc')
-    plt.plot(epochs, val_accs, label='Val Acc')
-    plt.xlabel('Epoch')
+    plt.plot(interval_plot_steps, interval_train_accs, label='Train Acc (interval)')
+    plt.plot(interval_plot_steps, interval_val_accs, label='Val Acc (interval)')
+    plt.xlabel('Step')
     plt.ylabel('Accuracy')
-    plt.title('Training and Validation Accuracy')
+    plt.title('Training and Validation Accuracy (per interval)')
     plt.legend()
     acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-acc.png")
     plt.savefig(acc_plot_path)
