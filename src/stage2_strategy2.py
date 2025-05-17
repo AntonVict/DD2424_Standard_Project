@@ -12,6 +12,27 @@ import matplotlib.pyplot as plt
 import random
 from tqdm import tqdm
 import numpy as np
+from torchvision import transforms # == For data augmentation =====
+
+# =========== DIFFERENT LEARNING RATES FOR DIFFERENT LAYERS ===============
+# Every time a new block is unfreezed, we rebuild the optimizer
+def build_optimizer(model, base_lr=1e-4, strategy="gradual"):
+    """Constructs optimizer with different learning rates for each unfrozen block."""
+    param_groups = []
+    
+    # Classifier head (always included)
+    param_groups.append({'params': model.fc.parameters(), 'lr': base_lr})
+    
+    # Gradual unfreezing of layer4 blocks
+    if hasattr(model, 'current_blocks'):
+        for i in range(model.current_blocks):
+            block_idx = len(model.layer4) - 1 - i
+            block = model.layer4[block_idx]
+            # Assign a smaller LR for earlier blocks
+            block_lr = base_lr * (0.5 ** i)
+            param_groups.append({'params': block.parameters(), 'lr': block_lr})
+    
+    return optim.Adam(param_groups, weight_decay=1e-4)  # ← includes L2 regularization!
 
 
 # what we choose here doenst matter
@@ -39,7 +60,7 @@ def log(msg):
 
 # Custom Dataset for multi-class classification (breed recognition)
 class PetBreedDataset(Dataset):
-    def __init__(self, data_dir, split_file, indices=None):
+    def __init__(self, data_dir, split_file, indices=None, train=True):
         self.img_dir = os.path.join(data_dir, "images")
         self.samples = []  # list of (img_path, label)
         with open(split_file) as f:
@@ -52,6 +73,24 @@ class PetBreedDataset(Dataset):
                 self.samples.append((f"{name}.jpg", label))
         if indices is not None:
             self.samples = [self.samples[i] for i in indices]
+
+        # ====== DATA AUGMENTATION ===========================
+        if train:
+            self.tfms = transforms.Compose([
+                transforms.RandomResizedCrop(224),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(15),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225]),
+            ])
+        else:
+            self.tfms = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225]),
+            ])
         # We'll handle transformations directly in __getitem__ to avoid errors
 
     def __len__(self):
@@ -182,7 +221,9 @@ def main():
     
     # Initialize optimizer with only the classifier parameters
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
+    #optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
+    # ===== L2 REGULARIZATION =========
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4, weight_decay=1e-4)
     
     # For plotting
     train_losses, train_accs = [], []
@@ -229,7 +270,9 @@ def main():
                 log(f"Progress: {progress*100:.1f}% - Unfrozen {target_blocks} blocks in layer4")
                 
                 # Update optimizer with new trainable parameters
-                optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
+                #optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
+                optimizer = build_optimizer(resnet34) # ==== DIFFERENT LEARNING RATES FOR DIFFERENT LAYERS ===============
+
             
             # Training step
             imgs, labels = imgs.to(device), labels.to(device)
