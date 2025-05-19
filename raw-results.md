@@ -645,3 +645,96 @@
 [Telemetry] Per-class accuracy plot saved to: logs/plots/stage3-imbalance-2025-05-19_16-51-54-per-class-accuracy-sorted.png
 [Telemetry] Sorted confusion matrix saved to: logs/plots/stage3-imbalance-2025-05-19_16-51-54-confmat-sorted.png
 [Telemetry] Model saved to: models/stage3-imbalance-2025-05-19_16-51-54.pt
+
+
+## Stage 3 Imbalanced Classification Run (2025-05-19_16-57-23)
+### Training Class Distribution
+![](logs/plots/stage3-imbalance-2025-05-19_16-57-23-class-distribution.png)
+### Training, Validation, and Test Loss
+![](logs/plots/stage3-imbalance-2025-05-19_16-57-23-loss.png)
+### Training, Validation, and Test Accuracy
+![](logs/plots/stage3-imbalance-2025-05-19_16-57-23-acc.png)
+### Per-Class Accuracy on Test Set
+![](logs/plots/stage3-imbalance-2025-05-19_16-57-23-per-class-accuracy.png)
+### Sorted Breed Confusion Matrix
+![](logs/plots/stage3-imbalance-2025-05-19_16-57-23-confmat_breed_sorted.png)
+### Species Confusion Matrix
+![](logs/plots/stage3-imbalance-2025-05-19_16-57-23-confmat_species.png)
+
+**Species Accuracy:**
+- Cat Species Accuracy: 0.9417
+- Dog Species Accuracy: 1.0000
+
+**Model saved at:** `models/stage3-imbalance-2025-05-19_16-57-23.pt`
+
+**Log:**
+
+[Telemetry] Training class distribution (label: count): [(0, 14), (1, 84), (2, 81), (3, 73), (4, 79), (5, 15), (6, 14), (7, 16), (8, 82), (9, 19), (10, 77), (11, 16), (12, 81), (13, 77), (14, 73), (15, 75), (16, 80), (17, 79), (18, 83), (19, 84), (20, 16), (21, 87), (22, 75), (23, 13), (24, 81), (25, 76), (26, 19), (27, 17), (28, 82), (29, 84), (30, 76), (31, 84), (32, 16), (33, 14), (34, 79), (35, 77), (36, 84)]
+[Telemetry] Number of training samples: 2182
+[Telemetry] Number of test samples: 3669
+[Telemetry] Batch size: 32
+[Telemetry] Using device: mps
+[Telemetry] Cat keep fraction: 0.2
+[Telemetry] Training class distribution plot saved to: logs/plots/stage3-imbalance-2025-05-19_16-57-23-class-distribution.png
+
+[Telemetry] Starting epoch 1/3
+[Telemetry][Epoch 1] Batch 69/69 | Loss: 0.7584 | Acc: 0.8333
+[Telemetry] Epoch 1 | Train Loss: 1.4719 | Train Acc: 0.6664
+[Telemetry] Epoch 1 | Val Loss: 0.5817 | Val Acc: 0.8718
+[Telemetry] Epoch 1 | Test Loss: 1.1230 | Test Acc: 0.7503
+
+[Telemetry] Starting epoch 2/3
+[Telemetry][Epoch 2] Batch 69/69 | Loss: 0.4289 | Acc: 0.8333
+[Telemetry] Epoch 2 | Train Loss: 0.3138 | Train Acc: 0.9551
+[Telemetry] Epoch 2 | Val Loss: 0.3922 | Val Acc: 0.8974
+[Telemetry] Epoch 2 | Test Loss: 0.6436 | Test Acc: 0.8122
+
+[Telemetry] Starting epoch 3/3
+[Telemetry][Epoch 3] Batch 69/69 | Loss: 0.2873 | Acc: 1.0000
+[Telemetry] Epoch 3 | Train Loss: 0.0988 | Train Acc: 0.9936
+[Telemetry] Epoch 3 | Val Loss: 0.2848 | Val Acc: 0.9231
+[Telemetry] Epoch 3 | Test Loss: 0.5065 | Test Acc: 0.8531
+[Telemetry] Per-class accuracy:
+  1: Abyssinian (Cat): 0.8163 (80/98)
+  2: american_bulldog (Dog): 0.8600 (86/100)
+  3: american_pit_bull_terrier (Dog): 0.6400 (64/100)
+  4: basset_hound (Dog): 0.9400 (94/100)
+  5: beagle (Dog): 0.9000 (90/100)
+  6: Bengal (Cat): 0.8900 (89/100)
+  7: Birman (Cat): 0.8400 (84/100)
+  8: Bombay (Cat): 0.8409 (74/88)
+  9: boxer (Dog): 0.9192 (91/99)
+  10: British_Shorthair (Cat): 0.4700 (47/100)
+  11: chihuahua (Dog): 0.8600 (86/100)
+  12: Egyptian_Mau (Cat): 0.3402 (33/97)
+  13: english_cocker_spaniel (Dog): 0.9200 (92/100)
+  14: english_setter (Dog): 0.9600 (96/100)
+  15: german_shorthaired (Dog): 0.9800 (98/100)
+  16: great_pyrenees (Dog): 0.9600 (96/100)
+  17: havanese (Dog): 0.9300 (93/100)
+  18: japanese_chin (Dog): 0.9800 (98/100)
+  19: keeshond (Dog): 0.9899 (98/99)
+  20: leonberger (Dog): 0.9800 (98/100)
+  21: Maine_Coon (Cat): 0.6200 (62/100)
+  22: miniature_pinscher (Dog): 0.8800 (88/100)
+  23: newfoundland (Dog): 0.9800 (98/100)
+  24: Persian (Cat): 0.6800 (68/100)
+  25: pomeranian (Dog): 0.9300 (93/100)
+  26: pug (Dog): 0.9500 (95/100)
+  27: Ragdoll (Cat): 0.7700 (77/100)
+  28: Russian_Blue (Cat): 0.9200 (92/100)
+  29: saint_bernard (Dog): 0.9700 (97/100)
+  30: samoyed (Dog): 0.9700 (97/100)
+  31: scottish_terrier (Dog): 0.9798 (97/99)
+  32: shiba_inu (Dog): 0.9400 (94/100)
+  33: Siamese (Cat): 0.6500 (65/100)
+  34: Sphynx (Cat): 0.8500 (85/100)
+  35: staffordshire_bull_terrier (Dog): 0.5843 (52/89)
+  36: wheaten_terrier (Dog): 0.9000 (90/100)
+  37: yorkshire_terrier (Dog): 0.9300 (93/100)
+[Telemetry] Per-class accuracy plot saved to: logs/plots/stage3-imbalance-2025-05-19_16-57-23-per-class-accuracy.png
+[Telemetry] Sorted breed confusion matrix saved to: logs/plots/stage3-imbalance-2025-05-19_16-57-23-confmat_breed_sorted.png
+[Telemetry] Cat Species Accuracy: 0.9417 (1114/1183)
+[Telemetry] Dog Species Accuracy: 1.0000 (2486/2486)
+[Telemetry] Species confusion matrix saved to: logs/plots/stage3-imbalance-2025-05-19_16-57-23-confmat_species.png
+[Telemetry] Model saved to: models/stage3-imbalance-2025-05-19_16-57-23.pt

@@ -70,11 +70,6 @@ class PetBreedImbalanceDataset(Dataset):
         if indices is not None:
             self.samples = [self.samples[i] for i in indices]
 
-        # Sort labels by species (Cats first, then Dogs)
-        self.sorted_labels = sorted(self.label_to_info.keys(), key=lambda x: (self.label_to_info[x][1], self.label_to_info[x][0]))
-        self.label_to_sorted_idx = {label: i for i, label in enumerate(self.sorted_labels)}
-
-
         self.tfms = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -96,24 +91,25 @@ def accuracy(outputs, labels):
     preds = torch.argmax(outputs, dim=1)
     return (preds == labels).float().mean().item(), preds
 
-def plot_confusion_matrix(cm, classes, save_path):
-    plt.figure(figsize=(15, 12)) # Increased figure size
+def plot_confusion_matrix(cm, classes, save_path, title='Confusion Matrix'):
+    plt.figure(figsize=(12, 10)) # Increased figure size
     plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-    plt.title('Confusion Matrix')
+    plt.title(title)
     plt.colorbar()
     tick_marks = np.arange(len(classes))
-    plt.xticks(tick_marks, classes, rotation=90, fontsize=6)
-    plt.yticks(tick_marks, classes, fontsize=6)
+    plt.xticks(tick_marks, classes, rotation=90, fontsize=8) # Increased font size for species matrix
+    plt.yticks(tick_marks, classes, fontsize=8) # Increased font size for species matrix
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches='tight')
     plt.close()
 
-def plot_class_distribution(label_counts, label_to_info, sorted_labels, save_path):
-    counts = [label_counts.get(label, 0) for label in sorted_labels] # Use .get for labels that might be missing in training due to imbalance
+def plot_class_distribution(label_counts, label_to_info, save_path):
+    labels = sorted(label_counts.keys())
+    counts = [label_counts[label] for label in labels]
     # Create descriptive labels for the plot
-    class_names = [f"{label+1}: {label_to_info[label][2]} ({'Cat' if label_to_info[label][1] == 1 else 'Dog'})" for label in sorted_labels]
+    class_names = [f"{label+1}: {label_to_info[label][2]} ({'Cat' if label_to_info[label][1] == 1 else 'Dog'})" for label in labels]
 
     plt.figure(figsize=(15, 7)) # Increased figure size
     plt.bar(class_names, counts)
@@ -169,13 +165,10 @@ def main():
     log(f"[Telemetry] Using device: {device}")
     log(f"[Telemetry] Cat keep fraction: {CAT_KEEP_FRAC}")
 
-    # Plot class distribution (using sorted labels)
+    # Plot class distribution
     class_dist_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-class-distribution.png")
-    plot_class_distribution(label_counts, train_ds.label_to_info, train_ds.sorted_labels, class_dist_plot_path)
+    plot_class_distribution(label_counts, train_ds.label_to_info, class_dist_plot_path)
     log(f"[Telemetry] Training class distribution plot saved to: {class_dist_plot_path}")
-
-    loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-loss.png")
-    acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-acc.png")
 
     # Model
     resnet34 = models.resnet34(weights="IMAGENET1K_V1")
@@ -247,6 +240,32 @@ def main():
         test_accs.append(test_acc/n)
         log(f"[Telemetry] Epoch {epoch+1} | Test Loss: {test_loss/n:.4f} | Test Acc: {test_acc/n:.4f}")
 
+    # Plotting
+    epochs = list(range(1, EPOCHS+1))
+    plt.figure()
+    plt.plot(epochs, train_losses, label='Train Loss')
+    plt.plot(epochs, val_losses, label='Val Loss')
+    plt.plot(epochs, test_losses, label='Test Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training, Validation, and Test Loss')
+    plt.legend()
+    loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-loss.png")
+    plt.savefig(loss_plot_path)
+    plt.close()
+
+    plt.figure()
+    plt.plot(epochs, train_accs, label='Train Acc')
+    plt.plot(epochs, val_accs, label='Val Acc')
+    plt.plot(epochs, test_accs, label='Test Acc')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.title('Training, Validation, and Test Accuracy')
+    plt.legend()
+    acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-acc.png")
+    plt.savefig(acc_plot_path)
+    plt.close()
+
     # Per-class accuracy
     per_class_correct = Counter()
     per_class_total = Counter()
@@ -255,47 +274,102 @@ def main():
         if label == pred:
             per_class_correct[label] += 1
     log("[Telemetry] Per-class accuracy:")
-    # Create descriptive labels for per-class accuracy output (using sorted labels)
+    # Create descriptive labels for per-class accuracy output
     class_accuracies = {}
-    for label in test_ds.sorted_labels:
+    for label in range(37):
         total = per_class_total[label]
         correct = per_class_correct[label]
         acc = correct / total if total > 0 else 0.0
         class_name = f"{label+1}: {test_ds.label_to_info[label][2]} ({'Cat' if test_ds.label_to_info[label][1] == 1 else 'Dog'})"
         log(f"  {class_name}: {acc:.4f} ({correct}/{total})")
-        class_accuracies[class_name] = acc # Store with descriptive name for plotting
+        class_accuracies[class_name] = acc
 
-    # Plot per-class accuracy (using sorted labels)
+    # Plot per-class accuracy
     plt.figure(figsize=(15, 7))
-    # Get classes and accuracies in the sorted order
-    sorted_class_names = [f"{label+1}: {test_ds.label_to_info[label][2]} ({'Cat' if test_ds.label_to_info[label][1] == 1 else 'Dog'})" for label in test_ds.sorted_labels]
-    sorted_accuracies = [class_accuracies.get(name, 0.0) for name in sorted_class_names] # Use .get in case a class is missing in test set somehow
-
-    plt.bar(sorted_class_names, sorted_accuracies)
+    classes = list(class_accuracies.keys())
+    accuracies = list(class_accuracies.values())
+    plt.bar(classes, accuracies)
     plt.xlabel("Class")
     plt.ylabel("Accuracy")
-    plt.title("Per-Class Accuracy on Test Set (Sorted by Species)")
+    plt.title("Per-Class Accuracy on Test Set")
     plt.xticks(rotation=90, fontsize=8)
     plt.tight_layout()
-    per_class_acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-per-class-accuracy-sorted.png")
+    per_class_acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-per-class-accuracy.png")
     plt.savefig(per_class_acc_plot_path)
     plt.close()
     log(f"[Telemetry] Per-class accuracy plot saved to: {per_class_acc_plot_path}")
 
 
-    # Confusion matrix
-    # Reorder confusion matrix based on sorted labels
-    sorted_cm = np.zeros((37, 37), dtype=int)
+    # Confusion matrix (Breed Level)
+    cm = np.zeros((37, 37), dtype=int)
     for t, p in zip(all_labels, all_preds):
-        sorted_t_idx = test_ds.label_to_sorted_idx[t]
-        sorted_p_idx = test_ds.label_to_sorted_idx[p]
-        sorted_cm[sorted_t_idx, sorted_p_idx] += 1
+        cm[t, p] += 1
 
-    # Create descriptive labels for confusion matrix axes (using sorted labels)
-    confusion_matrix_class_names_sorted = [f"{label+1}: {test_ds.label_to_info[label][2]} ({'Cat' if test_ds.label_to_info[label][1] == 1 else 'Dog'})" for label in test_ds.sorted_labels]
-    confmat_path_sorted = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-confmat-sorted.png")
-    plot_confusion_matrix(sorted_cm, confusion_matrix_class_names_sorted, confmat_path_sorted)
-    log(f"[Telemetry] Sorted confusion matrix saved to: {confmat_path_sorted}")
+    # Get sorted list of labels (cats first, then dogs) for breed confusion matrix
+    sorted_labels = sorted(test_ds.label_to_info.keys(), key=lambda x: (test_ds.label_to_info[x][1], x))
+
+    # Create a mapping from original label index to sorted label index
+    original_to_sorted_index = {original_label: sorted_index for sorted_index, original_label in enumerate(sorted_labels)}
+
+    # Create a new, sorted breed-level confusion matrix
+    sorted_cm = np.zeros((37, 37), dtype=int)
+    for i in range(37):
+        for j in range(37):
+            original_true_label = i
+            original_predicted_label = j
+            sorted_true_index = original_to_sorted_index[original_true_label]
+            sorted_predicted_index = original_to_sorted_index[original_predicted_label]
+            sorted_cm[sorted_true_index, sorted_predicted_index] = cm[original_true_label, original_predicted_label]
+
+
+    # Create descriptive labels for breed confusion matrix axes based on the sorted order
+    confusion_matrix_class_names_sorted = [f"{label+1}: {test_ds.label_to_info[label][2]} ({'Cat' if test_ds.label_to_info[label][1] == 1 else 'Dog'})" for label in sorted_labels]
+
+    confmat_breed_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-confmat_breed_sorted.png")
+    plot_confusion_matrix(sorted_cm, confusion_matrix_class_names_sorted, confmat_breed_path, title='Sorted Breed Confusion Matrix')
+    log(f"[Telemetry] Sorted breed confusion matrix saved to: {confmat_breed_path}")
+
+
+    # Confusion matrix (Species Level)
+    # Species 1 is Cat, Species 2 is Dog. Map labels to 0 for Cat, 1 for Dog for a 2x2 matrix.
+    species_cm = np.zeros((2, 2), dtype=int) # [[True Cat, Pred Cat], [True Cat, Pred Dog], [True Dog, Pred Cat], [True Dog, Pred Dog]]
+
+    species_map = {1: 0, 2: 1} # Map original species ID to 0-indexed for matrix
+
+    cat_total = 0
+    dog_total = 0
+    cat_correct_species = 0
+    dog_correct_species = 0
+
+    for true_label, pred_label in zip(all_labels, all_preds):
+        true_species = test_ds.label_to_info[true_label][1]
+        pred_species = test_ds.label_to_info[pred_label][1]
+
+        species_cm[species_map[true_species], species_map[pred_species]] += 1
+
+        if true_species == 1: # True Cat
+            cat_total += 1
+            if pred_species == 1: # Predicted Cat
+                cat_correct_species += 1
+        elif true_species == 2: # True Dog
+            dog_total += 1
+            if pred_species == 2: # Predicted Dog
+                dog_correct_species += 1
+
+    # Calculate species accuracy
+    cat_species_accuracy = cat_correct_species / cat_total if cat_total > 0 else 0.0
+    dog_species_accuracy = dog_correct_species / dog_total if dog_total > 0 else 0.0
+
+    log(f"[Telemetry] Cat Species Accuracy: {cat_species_accuracy:.4f} ({cat_correct_species}/{cat_total})")
+    log(f"[Telemetry] Dog Species Accuracy: {dog_species_accuracy:.4f} ({dog_correct_species}/{dog_total})")
+
+
+    # Plot species confusion matrix
+    species_classes = ['Cat', 'Dog']
+    confmat_species_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-confmat_species.png")
+    plot_confusion_matrix(species_cm, species_classes, confmat_species_path, title='Species Confusion Matrix')
+    log(f"[Telemetry] Species confusion matrix saved to: {confmat_species_path}")
+
 
     # Save model
     model_path = os.path.join(MODEL_DIR, f"stage3-imbalance-{pretty_timestamp}.pt")
@@ -311,10 +385,15 @@ def main():
         f.write(f"![]({loss_plot_path})\n")
         f.write(f"### Training, Validation, and Test Accuracy\n")
         f.write(f"![]({acc_plot_path})\n")
-        f.write(f"### Per-Class Accuracy on Test Set (Sorted by Species)\n")
+        f.write(f"### Per-Class Accuracy on Test Set\n")
         f.write(f"![]({per_class_acc_plot_path})\n")
-        f.write(f"### Confusion Matrix (Sorted by Species)\n")
-        f.write(f"![]({confmat_path_sorted})\n")
+        f.write(f"### Sorted Breed Confusion Matrix\n")
+        f.write(f"![]({confmat_breed_path})\n")
+        f.write(f"### Species Confusion Matrix\n")
+        f.write(f"![]({confmat_species_path})\n")
+        f.write(f"\n**Species Accuracy:**\n")
+        f.write(f"- Cat Species Accuracy: {cat_species_accuracy:.4f}\n")
+        f.write(f"- Dog Species Accuracy: {dog_species_accuracy:.4f}\n")
         f.write(f"\n**Model saved at:** `{model_path}`\n")
         f.write(f"\n**Log:**\n\n")
         with open(LOG_FILE) as logf:
