@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # ====== SETTINGS ======
-EPOCHS = 15  # For demonstration; increase for real training
+EPOCHS = 3  # For demonstration; increase for real training
 BATCH_SIZE = 32
 CAT_BREED_IDS = set(range(1, 26))  # 1-25 are cat breeds
 CAT_KEEP_FRAC = 0.2  # Keep only 20% of cat images

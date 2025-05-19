@@ -12,10 +12,8 @@ import matplotlib.pyplot as plt
 import random
 
 # ====== SETTINGS ======
-# Choose strategy: 'simultaneous' or 'gradual'
-STRATEGY = 'simultaneous'  # or 'gradual'
 L = 2  # Number of last layers to fine-tune in 'simultaneous' mode
-EPOCHS = 15  # For demonstration; increase for real training
+EPOCHS = 3  # For demonstration; increase for real training
 BATCH_SIZE = 32
 
 # Logging setup
@@ -23,16 +21,7 @@ LOG_DIR = "logs"
 PLOT_DIR = os.path.join(LOG_DIR, "plots")
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(PLOT_DIR, exist_ok=True)
-pretty_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-LOG_FILE = os.path.join(LOG_DIR, f"logs-{pretty_timestamp}.log")
 RAW_RESULTS = "raw-results.md"
-PLOT_PREFIX = f"stage2-multiclass-{pretty_timestamp}"
-
-def log(msg):
-    msg = str(msg)
-    print(msg)
-    with open(LOG_FILE, "a") as f:
-        f.write(msg + "\n")
 
 # Custom Dataset for multi-class classification (breed recognition)
 class PetBreedDataset(Dataset):
@@ -91,10 +80,20 @@ def accuracy(outputs, labels):
     return (preds == labels).float().mean().item()
 
 
-def main():
+def run_strategy(strategy, l, pretty_timestamp):
+    # Logging and plot prefix for this strategy
+    LOG_FILE = os.path.join(LOG_DIR, f"logs-stage2-multiclass-{strategy}-{pretty_timestamp}.log")
+    PLOT_PREFIX = f"stage2-multiclass-{strategy}-{pretty_timestamp}"
+    def log(msg):
+        msg = str(msg)
+        print(msg)
+        with open(LOG_FILE, "a") as f:
+            f.write(msg + "\n")
+
     # Paths
     DATA_DIR = "dataset/oxford-iiit-pet"
     TRAIN_FILE = os.path.join(DATA_DIR, "annotations", "trainval.txt")
+    TEST_FILE = os.path.join(DATA_DIR, "annotations", "test.txt")
     # Split trainval.txt into train/val indices
     with open(TRAIN_FILE) as f:
         lines = [line for line in f if len(line.strip().split()) >= 4]
@@ -108,8 +107,10 @@ def main():
     # Datasets and loaders
     train_ds = PetBreedDataset(DATA_DIR, TRAIN_FILE, indices=train_indices)
     val_ds = PetBreedDataset(DATA_DIR, TRAIN_FILE, indices=val_indices)
+    test_ds = PetBreedDataset(DATA_DIR, TEST_FILE)
     train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
     val_dl = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
+    test_dl = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
 
     # Device selection: CUDA > MPS > CPU
     if torch.cuda.is_available():
@@ -121,11 +122,12 @@ def main():
 
     log(f"[Telemetry] Number of training samples: {len(train_ds)}")
     log(f"[Telemetry] Number of validation samples: {len(val_ds)}")
+    log(f"[Telemetry] Number of test samples: {len(test_ds)}")
     log(f"[Telemetry] Batch size: {BATCH_SIZE}")
     log(f"[Telemetry] Using device: {device}")
-    log(f"[Telemetry] Strategy: {STRATEGY}")
-    if STRATEGY == 'simultaneous':
-        log(f"[Telemetry] Fine-tuning last {L} layers + classifier from start.")
+    log(f"[Telemetry] Strategy: {strategy}")
+    if strategy == 'simultaneous':
+        log(f"[Telemetry] Fine-tuning last {l} layers + classifier from start.")
     else:
         log(f"[Telemetry] Gradual unfreezing: starting with classifier only.")
 
@@ -136,7 +138,7 @@ def main():
     resnet34 = resnet34.to(device)
 
     # Set requires_grad according to strategy
-    set_parameter_requires_grad(resnet34, L, STRATEGY)
+    set_parameter_requires_grad(resnet34, l, strategy)
 
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -145,6 +147,7 @@ def main():
     # For plotting
     train_losses, train_accs = [], []
     val_losses, val_accs = [], []
+    test_losses, test_accs = [], []
 
     for epoch in range(EPOCHS):
         log(f"\n[Telemetry] Starting epoch {epoch+1}/{EPOCHS}")
@@ -167,7 +170,7 @@ def main():
         log(f"[Telemetry] Epoch {epoch+1} | Train Loss: {train_loss/n:.4f} | Train Acc: {train_acc/n:.4f}")
 
         # Gradual unfreezing: unfreeze one more layer each epoch
-        if STRATEGY == 'gradual' and epoch+1 <= 4:
+        if strategy == 'gradual' and epoch+1 <= 4:
             # Unfreeze one more layer (layer4, then layer3, ...)
             layers = [resnet34.layer4, resnet34.layer3, resnet34.layer2, resnet34.layer1]
             for param in layers[-epoch-1].parameters():
@@ -175,6 +178,7 @@ def main():
             optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
             log(f"[Telemetry] Gradual: Unfroze layer {4-epoch}")
 
+        # Validation
         resnet34.eval()
         val_loss, val_acc, n = 0, 0, 0
         with torch.no_grad():
@@ -182,21 +186,38 @@ def main():
                 imgs, labels = imgs.to(device), labels.to(device)
                 outputs = resnet34(imgs)
                 loss = criterion(outputs, labels)
+                acc = accuracy(outputs, labels)
                 val_loss += loss.item() * imgs.size(0)
-                val_acc += accuracy(outputs, labels) * imgs.size(0)
+                val_acc += acc * imgs.size(0)
                 n += imgs.size(0)
         val_losses.append(val_loss/n)
         val_accs.append(val_acc/n)
         log(f"[Telemetry] Epoch {epoch+1} | Val Loss: {val_loss/n:.4f} | Val Acc: {val_acc/n:.4f}")
+
+        # Test set evaluation (per epoch)
+        test_loss, test_acc, n = 0, 0, 0
+        with torch.no_grad():
+            for imgs, labels in test_dl:
+                imgs, labels = imgs.to(device), labels.to(device)
+                outputs = resnet34(imgs)
+                loss = criterion(outputs, labels)
+                acc = accuracy(outputs, labels)
+                test_loss += loss.item() * imgs.size(0)
+                test_acc += acc * imgs.size(0)
+                n += imgs.size(0)
+        test_losses.append(test_loss/n)
+        test_accs.append(test_acc/n)
+        log(f"[Telemetry] Epoch {epoch+1} | Test Loss: {test_loss/n:.4f} | Test Acc: {test_acc/n:.4f}")
 
     # Plotting
     epochs = list(range(1, EPOCHS+1))
     plt.figure()
     plt.plot(epochs, train_losses, label='Train Loss')
     plt.plot(epochs, val_losses, label='Val Loss')
+    plt.plot(epochs, test_losses, label='Test Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
-    plt.title('Training and Validation Loss')
+    plt.title(f'Training, Validation, and Test Loss ({strategy})')
     plt.legend()
     loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-loss.png")
     plt.savefig(loss_plot_path)
@@ -205,9 +226,10 @@ def main():
     plt.figure()
     plt.plot(epochs, train_accs, label='Train Acc')
     plt.plot(epochs, val_accs, label='Val Acc')
+    plt.plot(epochs, test_accs, label='Test Acc')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
-    plt.title('Training and Validation Accuracy')
+    plt.title(f'Training, Validation, and Test Accuracy ({strategy})')
     plt.legend()
     acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-acc.png")
     plt.savefig(acc_plot_path)
@@ -215,13 +237,19 @@ def main():
 
     # Append to raw-results.md
     with open(RAW_RESULTS, "a") as f:
-        f.write(f"\n\n## Stage 2 Multi-class Classification Run ({pretty_timestamp})\n")
+        f.write(f"\n\n## Stage 2 Multi-class Classification Run ({strategy}, {pretty_timestamp})\n")
         f.write(f"![]({loss_plot_path})\n")
         f.write(f"![]({acc_plot_path})\n")
         f.write(f"\n**Log:**\n\n")
         with open(LOG_FILE) as logf:
             for line in logf:
                 f.write(line)
+
+
+def main():
+    pretty_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    run_strategy('simultaneous', L, pretty_timestamp)
+    run_strategy('gradual', L, pretty_timestamp)
 
 if __name__ == "__main__":
     main() 

@@ -396,3 +396,78 @@
   Class 37: 0.8800 (88/100)
 [Telemetry] Confusion matrix saved to: logs/plots/stage3-imbalance-2025-05-14_12-58-25-confmat.png
 [Telemetry] Model saved to: models/stage3-imbalance-2025-05-14_12-58-25.pt
+
+
+## Stage 3 Imbalanced Classification Run (2025-05-19_16-29-47)
+![](logs/plots/stage3-imbalance-2025-05-19_16-29-47-loss.png)
+![](logs/plots/stage3-imbalance-2025-05-19_16-29-47-acc.png)
+![](logs/plots/stage3-imbalance-2025-05-19_16-29-47-confmat.png)
+
+**Model saved at:** `models/stage3-imbalance-2025-05-19_16-29-47.pt`
+
+**Log:**
+
+[Telemetry] Training class distribution (label: count): [(0, 14), (1, 84), (2, 81), (3, 73), (4, 79), (5, 15), (6, 14), (7, 16), (8, 82), (9, 19), (10, 77), (11, 16), (12, 81), (13, 77), (14, 73), (15, 75), (16, 80), (17, 79), (18, 83), (19, 84), (20, 16), (21, 87), (22, 75), (23, 13), (24, 81), (25, 76), (26, 19), (27, 17), (28, 82), (29, 84), (30, 76), (31, 84), (32, 16), (33, 14), (34, 79), (35, 77), (36, 84)]
+[Telemetry] Number of training samples: 2182
+[Telemetry] Number of test samples: 3669
+[Telemetry] Batch size: 32
+[Telemetry] Using device: mps
+[Telemetry] Cat keep fraction: 0.2
+
+[Telemetry] Starting epoch 1/3
+[Telemetry][Epoch 1] Batch 69/69 | Loss: 2.1116 | Acc: 0.3333
+[Telemetry] Epoch 1 | Train Loss: 1.4358 | Train Acc: 0.6618
+[Telemetry] Epoch 1 | Val Loss: 0.5956 | Val Acc: 0.8315
+[Telemetry] Epoch 1 | Test Loss: 1.0245 | Test Acc: 0.7307
+
+[Telemetry] Starting epoch 2/3
+[Telemetry][Epoch 2] Batch 69/69 | Loss: 0.5631 | Acc: 0.8333
+[Telemetry] Epoch 2 | Train Loss: 0.2868 | Train Acc: 0.9537
+[Telemetry] Epoch 2 | Val Loss: 0.4258 | Val Acc: 0.8901
+[Telemetry] Epoch 2 | Test Loss: 0.6631 | Test Acc: 0.8106
+
+[Telemetry] Starting epoch 3/3
+[Telemetry][Epoch 3] Batch 69/69 | Loss: 0.1827 | Acc: 1.0000
+[Telemetry] Epoch 3 | Train Loss: 0.0918 | Train Acc: 0.9904
+[Telemetry] Epoch 3 | Val Loss: 0.3028 | Val Acc: 0.9084
+[Telemetry] Epoch 3 | Test Loss: 0.5173 | Test Acc: 0.8455
+[Telemetry] Per-class accuracy:
+  Class  1: 0.6429 (63/98)
+  Class  2: 0.8600 (86/100)
+  Class  3: 0.5100 (51/100)
+  Class  4: 0.8600 (86/100)
+  Class  5: 0.9200 (92/100)
+  Class  6: 0.9100 (91/100)
+  Class  7: 0.5900 (59/100)
+  Class  8: 0.8977 (79/88)
+  Class  9: 0.9293 (92/99)
+  Class 10: 0.9100 (91/100)
+  Class 11: 0.8600 (86/100)
+  Class 12: 0.6082 (59/97)
+  Class 13: 0.9100 (91/100)
+  Class 14: 0.9400 (94/100)
+  Class 15: 0.9800 (98/100)
+  Class 16: 0.9600 (96/100)
+  Class 17: 0.9700 (97/100)
+  Class 18: 0.9700 (97/100)
+  Class 19: 0.9798 (97/99)
+  Class 20: 0.9800 (98/100)
+  Class 21: 0.7700 (77/100)
+  Class 22: 0.8400 (84/100)
+  Class 23: 0.9900 (99/100)
+  Class 24: 0.8400 (84/100)
+  Class 25: 0.9400 (94/100)
+  Class 26: 0.9400 (94/100)
+  Class 27: 0.7700 (77/100)
+  Class 28: 0.2500 (25/100)
+  Class 29: 0.9700 (97/100)
+  Class 30: 0.9800 (98/100)
+  Class 31: 0.9899 (98/99)
+  Class 32: 0.9800 (98/100)
+  Class 33: 0.5900 (59/100)
+  Class 34: 0.7300 (73/100)
+  Class 35: 0.7303 (65/89)
+  Class 36: 0.8800 (88/100)
+  Class 37: 0.8900 (89/100)
+[Telemetry] Confusion matrix saved to: logs/plots/stage3-imbalance-2025-05-19_16-29-47-confmat.png
+[Telemetry] Model saved to: models/stage3-imbalance-2025-05-19_16-29-47.pt
