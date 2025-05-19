@@ -70,6 +70,11 @@ class PetBreedImbalanceDataset(Dataset):
         if indices is not None:
             self.samples = [self.samples[i] for i in indices]
 
+        # Sort labels by species (Cats first, then Dogs)
+        self.sorted_labels = sorted(self.label_to_info.keys(), key=lambda x: (self.label_to_info[x][1], self.label_to_info[x][0]))
+        self.label_to_sorted_idx = {label: i for i, label in enumerate(self.sorted_labels)}
+
+
         self.tfms = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -92,7 +97,7 @@ def accuracy(outputs, labels):
     return (preds == labels).float().mean().item(), preds
 
 def plot_confusion_matrix(cm, classes, save_path):
-    plt.figure(figsize=(12, 10)) # Increased figure size
+    plt.figure(figsize=(15, 12)) # Increased figure size
     plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
     plt.title('Confusion Matrix')
     plt.colorbar()
@@ -105,11 +110,10 @@ def plot_confusion_matrix(cm, classes, save_path):
     plt.savefig(save_path, bbox_inches='tight')
     plt.close()
 
-def plot_class_distribution(label_counts, label_to_info, save_path):
-    labels = sorted(label_counts.keys())
-    counts = [label_counts[label] for label in labels]
+def plot_class_distribution(label_counts, label_to_info, sorted_labels, save_path):
+    counts = [label_counts.get(label, 0) for label in sorted_labels] # Use .get for labels that might be missing in training due to imbalance
     # Create descriptive labels for the plot
-    class_names = [f"{label+1}: {label_to_info[label][2]} ({'Cat' if label_to_info[label][1] == 1 else 'Dog'})" for label in labels]
+    class_names = [f"{label+1}: {label_to_info[label][2]} ({'Cat' if label_to_info[label][1] == 1 else 'Dog'})" for label in sorted_labels]
 
     plt.figure(figsize=(15, 7)) # Increased figure size
     plt.bar(class_names, counts)
@@ -165,10 +169,13 @@ def main():
     log(f"[Telemetry] Using device: {device}")
     log(f"[Telemetry] Cat keep fraction: {CAT_KEEP_FRAC}")
 
-    # Plot class distribution
+    # Plot class distribution (using sorted labels)
     class_dist_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-class-distribution.png")
-    plot_class_distribution(label_counts, train_ds.label_to_info, class_dist_plot_path)
+    plot_class_distribution(label_counts, train_ds.label_to_info, train_ds.sorted_labels, class_dist_plot_path)
     log(f"[Telemetry] Training class distribution plot saved to: {class_dist_plot_path}")
+
+    loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-loss.png")
+    acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-acc.png")
 
     # Model
     resnet34 = models.resnet34(weights="IMAGENET1K_V1")
@@ -240,32 +247,6 @@ def main():
         test_accs.append(test_acc/n)
         log(f"[Telemetry] Epoch {epoch+1} | Test Loss: {test_loss/n:.4f} | Test Acc: {test_acc/n:.4f}")
 
-    # Plotting
-    epochs = list(range(1, EPOCHS+1))
-    plt.figure()
-    plt.plot(epochs, train_losses, label='Train Loss')
-    plt.plot(epochs, val_losses, label='Val Loss')
-    plt.plot(epochs, test_losses, label='Test Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training, Validation, and Test Loss')
-    plt.legend()
-    loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-loss.png")
-    plt.savefig(loss_plot_path)
-    plt.close()
-
-    plt.figure()
-    plt.plot(epochs, train_accs, label='Train Acc')
-    plt.plot(epochs, val_accs, label='Val Acc')
-    plt.plot(epochs, test_accs, label='Test Acc')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.title('Training, Validation, and Test Accuracy')
-    plt.legend()
-    acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-acc.png")
-    plt.savefig(acc_plot_path)
-    plt.close()
-
     # Per-class accuracy
     per_class_correct = Counter()
     per_class_total = Counter()
@@ -274,41 +255,47 @@ def main():
         if label == pred:
             per_class_correct[label] += 1
     log("[Telemetry] Per-class accuracy:")
-    # Create descriptive labels for per-class accuracy output
+    # Create descriptive labels for per-class accuracy output (using sorted labels)
     class_accuracies = {}
-    for label in range(37):
+    for label in test_ds.sorted_labels:
         total = per_class_total[label]
         correct = per_class_correct[label]
         acc = correct / total if total > 0 else 0.0
         class_name = f"{label+1}: {test_ds.label_to_info[label][2]} ({'Cat' if test_ds.label_to_info[label][1] == 1 else 'Dog'})"
         log(f"  {class_name}: {acc:.4f} ({correct}/{total})")
-        class_accuracies[class_name] = acc
+        class_accuracies[class_name] = acc # Store with descriptive name for plotting
 
-    # Plot per-class accuracy
+    # Plot per-class accuracy (using sorted labels)
     plt.figure(figsize=(15, 7))
-    classes = list(class_accuracies.keys())
-    accuracies = list(class_accuracies.values())
-    plt.bar(classes, accuracies)
+    # Get classes and accuracies in the sorted order
+    sorted_class_names = [f"{label+1}: {test_ds.label_to_info[label][2]} ({'Cat' if test_ds.label_to_info[label][1] == 1 else 'Dog'})" for label in test_ds.sorted_labels]
+    sorted_accuracies = [class_accuracies.get(name, 0.0) for name in sorted_class_names] # Use .get in case a class is missing in test set somehow
+
+    plt.bar(sorted_class_names, sorted_accuracies)
     plt.xlabel("Class")
     plt.ylabel("Accuracy")
-    plt.title("Per-Class Accuracy on Test Set")
+    plt.title("Per-Class Accuracy on Test Set (Sorted by Species)")
     plt.xticks(rotation=90, fontsize=8)
     plt.tight_layout()
-    per_class_acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-per-class-accuracy.png")
+    per_class_acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-per-class-accuracy-sorted.png")
     plt.savefig(per_class_acc_plot_path)
     plt.close()
     log(f"[Telemetry] Per-class accuracy plot saved to: {per_class_acc_plot_path}")
 
 
     # Confusion matrix
-    cm = np.zeros((37, 37), dtype=int)
+    # Reorder confusion matrix based on sorted labels
+    sorted_cm = np.zeros((37, 37), dtype=int)
     for t, p in zip(all_labels, all_preds):
-        cm[t, p] += 1
-    # Create descriptive labels for confusion matrix axes
-    confusion_matrix_class_names = [f"{i+1}: {test_ds.label_to_info[i][2]} ({'Cat' if test_ds.label_to_info[i][1] == 1 else 'Dog'})" for i in range(37)]
-    confmat_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-confmat.png")
-    plot_confusion_matrix(cm, confusion_matrix_class_names, confmat_path)
-    log(f"[Telemetry] Confusion matrix saved to: {confmat_path}")
+        sorted_t_idx = test_ds.label_to_sorted_idx[t]
+        sorted_p_idx = test_ds.label_to_sorted_idx[p]
+        sorted_cm[sorted_t_idx, sorted_p_idx] += 1
+
+    # Create descriptive labels for confusion matrix axes (using sorted labels)
+    confusion_matrix_class_names_sorted = [f"{label+1}: {test_ds.label_to_info[label][2]} ({'Cat' if test_ds.label_to_info[label][1] == 1 else 'Dog'})" for label in test_ds.sorted_labels]
+    confmat_path_sorted = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-confmat-sorted.png")
+    plot_confusion_matrix(sorted_cm, confusion_matrix_class_names_sorted, confmat_path_sorted)
+    log(f"[Telemetry] Sorted confusion matrix saved to: {confmat_path_sorted}")
 
     # Save model
     model_path = os.path.join(MODEL_DIR, f"stage3-imbalance-{pretty_timestamp}.pt")
@@ -324,10 +311,10 @@ def main():
         f.write(f"![]({loss_plot_path})\n")
         f.write(f"### Training, Validation, and Test Accuracy\n")
         f.write(f"![]({acc_plot_path})\n")
-        f.write(f"### Per-Class Accuracy on Test Set\n")
+        f.write(f"### Per-Class Accuracy on Test Set (Sorted by Species)\n")
         f.write(f"![]({per_class_acc_plot_path})\n")
-        f.write(f"### Confusion Matrix\n")
-        f.write(f"![]({confmat_path})\n")
+        f.write(f"### Confusion Matrix (Sorted by Species)\n")
+        f.write(f"![]({confmat_path_sorted})\n")
         f.write(f"\n**Model saved at:** `{model_path}`\n")
         f.write(f"\n**Log:**\n\n")
         with open(LOG_FILE) as logf:
