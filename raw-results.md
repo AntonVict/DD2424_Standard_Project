@@ -471,3 +471,87 @@
   Class 37: 0.8900 (89/100)
 [Telemetry] Confusion matrix saved to: logs/plots/stage3-imbalance-2025-05-19_16-29-47-confmat.png
 [Telemetry] Model saved to: models/stage3-imbalance-2025-05-19_16-29-47.pt
+
+
+## Stage 3 Imbalanced Classification Run (2025-05-19_16-38-12)
+### Training Class Distribution
+![](logs/plots/stage3-imbalance-2025-05-19_16-38-12-class-distribution.png)
+### Training, Validation, and Test Loss
+![](logs/plots/stage3-imbalance-2025-05-19_16-38-12-loss.png)
+### Training, Validation, and Test Accuracy
+![](logs/plots/stage3-imbalance-2025-05-19_16-38-12-acc.png)
+### Per-Class Accuracy on Test Set
+![](logs/plots/stage3-imbalance-2025-05-19_16-38-12-per-class-accuracy.png)
+### Confusion Matrix
+![](logs/plots/stage3-imbalance-2025-05-19_16-38-12-confmat.png)
+
+**Model saved at:** `models/stage3-imbalance-2025-05-19_16-38-12.pt`
+
+**Log:**
+
+[Telemetry] Training class distribution (label: count): [(0, 14), (1, 84), (2, 81), (3, 73), (4, 79), (5, 15), (6, 14), (7, 16), (8, 82), (9, 19), (10, 77), (11, 16), (12, 81), (13, 77), (14, 73), (15, 75), (16, 80), (17, 79), (18, 83), (19, 84), (20, 16), (21, 87), (22, 75), (23, 13), (24, 81), (25, 76), (26, 19), (27, 17), (28, 82), (29, 84), (30, 76), (31, 84), (32, 16), (33, 14), (34, 79), (35, 77), (36, 84)]
+[Telemetry] Number of training samples: 2182
+[Telemetry] Number of test samples: 3669
+[Telemetry] Batch size: 32
+[Telemetry] Using device: mps
+[Telemetry] Cat keep fraction: 0.2
+[Telemetry] Training class distribution plot saved to: logs/plots/stage3-imbalance-2025-05-19_16-38-12-class-distribution.png
+
+[Telemetry] Starting epoch 1/3
+[Telemetry][Epoch 1] Batch 69/69 | Loss: 2.1707 | Acc: 0.5000
+[Telemetry] Epoch 1 | Train Loss: 1.5064 | Train Acc: 0.6558
+[Telemetry] Epoch 1 | Val Loss: 0.6142 | Val Acc: 0.8608
+[Telemetry] Epoch 1 | Test Loss: 1.1489 | Test Acc: 0.7051
+
+[Telemetry] Starting epoch 2/3
+[Telemetry][Epoch 2] Batch 69/69 | Loss: 0.6290 | Acc: 0.8333
+[Telemetry] Epoch 2 | Train Loss: 0.3340 | Train Acc: 0.9478
+[Telemetry] Epoch 2 | Val Loss: 0.3567 | Val Acc: 0.9176
+[Telemetry] Epoch 2 | Test Loss: 0.6498 | Test Acc: 0.8277
+
+[Telemetry] Starting epoch 3/3
+[Telemetry][Epoch 3] Batch 69/69 | Loss: 0.0807 | Acc: 1.0000
+[Telemetry] Epoch 3 | Train Loss: 0.0980 | Train Acc: 0.9918
+[Telemetry] Epoch 3 | Val Loss: 0.2943 | Val Acc: 0.9249
+[Telemetry] Epoch 3 | Test Loss: 0.5216 | Test Acc: 0.8555
+[Telemetry] Per-class accuracy:
+  1: Abyssinian (Cat): 0.7143 (70/98)
+  2: american_bulldog (Dog): 0.8600 (86/100)
+  3: american_pit_bull_terrier (Dog): 0.4800 (48/100)
+  4: basset_hound (Dog): 0.8500 (85/100)
+  5: beagle (Dog): 0.9000 (90/100)
+  6: Bengal (Cat): 0.8000 (80/100)
+  7: Birman (Cat): 0.5200 (52/100)
+  8: Bombay (Cat): 0.8295 (73/88)
+  9: boxer (Dog): 0.8687 (86/99)
+  10: British_Shorthair (Cat): 0.7100 (71/100)
+  11: chihuahua (Dog): 0.8300 (83/100)
+  12: Egyptian_Mau (Cat): 0.8351 (81/97)
+  13: english_cocker_spaniel (Dog): 0.9300 (93/100)
+  14: english_setter (Dog): 0.9300 (93/100)
+  15: german_shorthaired (Dog): 0.9900 (99/100)
+  16: great_pyrenees (Dog): 0.9500 (95/100)
+  17: havanese (Dog): 0.9600 (96/100)
+  18: japanese_chin (Dog): 0.9600 (96/100)
+  19: keeshond (Dog): 0.9798 (97/99)
+  20: leonberger (Dog): 0.9600 (96/100)
+  21: Maine_Coon (Cat): 0.7000 (70/100)
+  22: miniature_pinscher (Dog): 0.9300 (93/100)
+  23: newfoundland (Dog): 0.9800 (98/100)
+  24: Persian (Cat): 0.7800 (78/100)
+  25: pomeranian (Dog): 0.9400 (94/100)
+  26: pug (Dog): 0.9200 (92/100)
+  27: Ragdoll (Cat): 0.8600 (86/100)
+  28: Russian_Blue (Cat): 0.6900 (69/100)
+  29: saint_bernard (Dog): 0.9600 (96/100)
+  30: samoyed (Dog): 1.0000 (100/100)
+  31: scottish_terrier (Dog): 0.9899 (98/99)
+  32: shiba_inu (Dog): 0.9500 (95/100)
+  33: Siamese (Cat): 0.7600 (76/100)
+  34: Sphynx (Cat): 0.8400 (84/100)
+  35: staffordshire_bull_terrier (Dog): 0.7191 (64/89)
+  36: wheaten_terrier (Dog): 0.9100 (91/100)
+  37: yorkshire_terrier (Dog): 0.8500 (85/100)
+[Telemetry] Per-class accuracy plot saved to: logs/plots/stage3-imbalance-2025-05-19_16-38-12-per-class-accuracy.png
+[Telemetry] Confusion matrix saved to: logs/plots/stage3-imbalance-2025-05-19_16-38-12-confmat.png
+[Telemetry] Model saved to: models/stage3-imbalance-2025-05-19_16-38-12.pt

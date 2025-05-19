@@ -42,17 +42,23 @@ class PetBreedImbalanceDataset(Dataset):
     def __init__(self, data_dir, split_file, cat_keep_frac=1.0, indices=None, build_full=False):
         self.img_dir = os.path.join(data_dir, "images")
         self.samples = []  # list of (img_path, label, breed_id, species)
+        self.label_to_info = {} # Map label (0-36) to (breed_id, species, breed_name)
         breed_to_samples = defaultdict(list)
+        # Read breed information and samples
         with open(split_file) as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) < 4:
                     continue
-                name, classid, species, breedid = parts
-                label = int(classid) - 1  # 0-36
-                breedid = int(breedid)
-                species = int(species)
+                name, classid_str, species_str, breedid_str = parts
+                label = int(classid_str) - 1  # 0-36
+                breedid = int(breedid_str)
+                species = int(species_str) # 1 for cat, 2 for dog
+                # Infer breed name (simple approach: use the filename prefix)
+                breed_name = "_".join(name.split('_')[:-1])
+                self.label_to_info[label] = (breedid, species, breed_name)
                 breed_to_samples[(label, breedid, species)].append((f"{name}.jpg", label, breedid, species))
+
         # For cat breeds, keep only a fraction
         for (label, breedid, species), samples in breed_to_samples.items():
             if species == 1:  # Cat
@@ -60,8 +66,10 @@ class PetBreedImbalanceDataset(Dataset):
                 self.samples.extend(random.sample(samples, k))
             else:
                 self.samples.extend(samples)
+
         if indices is not None:
             self.samples = [self.samples[i] for i in indices]
+
         self.tfms = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -84,7 +92,7 @@ def accuracy(outputs, labels):
     return (preds == labels).float().mean().item(), preds
 
 def plot_confusion_matrix(cm, classes, save_path):
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(12, 10)) # Increased figure size
     plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
     plt.title('Confusion Matrix')
     plt.colorbar()
@@ -97,12 +105,30 @@ def plot_confusion_matrix(cm, classes, save_path):
     plt.savefig(save_path, bbox_inches='tight')
     plt.close()
 
+def plot_class_distribution(label_counts, label_to_info, save_path):
+    labels = sorted(label_counts.keys())
+    counts = [label_counts[label] for label in labels]
+    # Create descriptive labels for the plot
+    class_names = [f"{label+1}: {label_to_info[label][2]} ({'Cat' if label_to_info[label][1] == 1 else 'Dog'})" for label in labels]
+
+    plt.figure(figsize=(15, 7)) # Increased figure size
+    plt.bar(class_names, counts)
+    plt.xlabel("Class")
+    plt.ylabel("Number of samples")
+    plt.title("Training Class Distribution")
+    plt.xticks(rotation=90, fontsize=8)
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches='tight')
+    plt.close()
+
+
 def main():
     # Paths
-    DATA_DIR = "dataset/oxford-iiit-pet"
+    DATA_DIR = "dataset/oxford-iiit-pet" # Assuming dataset is in a 'dataset' subdirectory
     TRAIN_FILE = os.path.join(DATA_DIR, "annotations", "trainval.txt")
     TEST_FILE = os.path.join(DATA_DIR, "annotations", "test.txt")
-    # Build the full filtered sample list first
+
+    # Build the full filtered sample list first to get consistent train/val split
     full_train_ds = PetBreedImbalanceDataset(DATA_DIR, TRAIN_FILE, cat_keep_frac=CAT_KEEP_FRAC)
     n_total = len(full_train_ds)
     indices = list(range(n_total))
@@ -111,10 +137,12 @@ def main():
     split = int(0.8 * n_total)
     train_indices = indices[:split]
     val_indices = indices[split:]
+
     # Datasets and loaders
     train_ds = PetBreedImbalanceDataset(DATA_DIR, TRAIN_FILE, cat_keep_frac=CAT_KEEP_FRAC, indices=train_indices)
     val_ds = PetBreedImbalanceDataset(DATA_DIR, TRAIN_FILE, cat_keep_frac=CAT_KEEP_FRAC, indices=val_indices)
-    test_ds = PetBreedImbalanceDataset(DATA_DIR, TEST_FILE, cat_keep_frac=1.0)
+    test_ds = PetBreedImbalanceDataset(DATA_DIR, TEST_FILE, cat_keep_frac=1.0) # Use full test set
+
     train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
     val_dl = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
     test_dl = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
@@ -127,7 +155,7 @@ def main():
     else:
         device = torch.device("cpu")
 
-    # Print class distribution
+    # Print and plot class distribution
     train_labels = [label for _, label, _, _ in train_ds.samples]
     label_counts = Counter(train_labels)
     log(f"[Telemetry] Training class distribution (label: count): {sorted(label_counts.items())}")
@@ -136,6 +164,11 @@ def main():
     log(f"[Telemetry] Batch size: {BATCH_SIZE}")
     log(f"[Telemetry] Using device: {device}")
     log(f"[Telemetry] Cat keep fraction: {CAT_KEEP_FRAC}")
+
+    # Plot class distribution
+    class_dist_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-class-distribution.png")
+    plot_class_distribution(label_counts, train_ds.label_to_info, class_dist_plot_path)
+    log(f"[Telemetry] Training class distribution plot saved to: {class_dist_plot_path}")
 
     # Model
     resnet34 = models.resnet34(weights="IMAGENET1K_V1")
@@ -241,18 +274,40 @@ def main():
         if label == pred:
             per_class_correct[label] += 1
     log("[Telemetry] Per-class accuracy:")
+    # Create descriptive labels for per-class accuracy output
+    class_accuracies = {}
     for label in range(37):
         total = per_class_total[label]
         correct = per_class_correct[label]
         acc = correct / total if total > 0 else 0.0
-        log(f"  Class {label+1:2d}: {acc:.4f} ({correct}/{total})")
+        class_name = f"{label+1}: {test_ds.label_to_info[label][2]} ({'Cat' if test_ds.label_to_info[label][1] == 1 else 'Dog'})"
+        log(f"  {class_name}: {acc:.4f} ({correct}/{total})")
+        class_accuracies[class_name] = acc
+
+    # Plot per-class accuracy
+    plt.figure(figsize=(15, 7))
+    classes = list(class_accuracies.keys())
+    accuracies = list(class_accuracies.values())
+    plt.bar(classes, accuracies)
+    plt.xlabel("Class")
+    plt.ylabel("Accuracy")
+    plt.title("Per-Class Accuracy on Test Set")
+    plt.xticks(rotation=90, fontsize=8)
+    plt.tight_layout()
+    per_class_acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-per-class-accuracy.png")
+    plt.savefig(per_class_acc_plot_path)
+    plt.close()
+    log(f"[Telemetry] Per-class accuracy plot saved to: {per_class_acc_plot_path}")
+
 
     # Confusion matrix
     cm = np.zeros((37, 37), dtype=int)
     for t, p in zip(all_labels, all_preds):
         cm[t, p] += 1
+    # Create descriptive labels for confusion matrix axes
+    confusion_matrix_class_names = [f"{i+1}: {test_ds.label_to_info[i][2]} ({'Cat' if test_ds.label_to_info[i][1] == 1 else 'Dog'})" for i in range(37)]
     confmat_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-confmat.png")
-    plot_confusion_matrix(cm, [str(i+1) for i in range(37)], confmat_path)
+    plot_confusion_matrix(cm, confusion_matrix_class_names, confmat_path)
     log(f"[Telemetry] Confusion matrix saved to: {confmat_path}")
 
     # Save model
@@ -263,8 +318,15 @@ def main():
     # Append to raw-results.md
     with open(RAW_RESULTS, "a") as f:
         f.write(f"\n\n## Stage 3 Imbalanced Classification Run ({pretty_timestamp})\n")
+        f.write(f"### Training Class Distribution\n")
+        f.write(f"![]({class_dist_plot_path})\n")
+        f.write(f"### Training, Validation, and Test Loss\n")
         f.write(f"![]({loss_plot_path})\n")
+        f.write(f"### Training, Validation, and Test Accuracy\n")
         f.write(f"![]({acc_plot_path})\n")
+        f.write(f"### Per-Class Accuracy on Test Set\n")
+        f.write(f"![]({per_class_acc_plot_path})\n")
+        f.write(f"### Confusion Matrix\n")
         f.write(f"![]({confmat_path})\n")
         f.write(f"\n**Model saved at:** `{model_path}`\n")
         f.write(f"\n**Log:**\n\n")
@@ -273,4 +335,4 @@ def main():
                 f.write(line)
 
 if __name__ == "__main__":
-    main() 
+    main()
