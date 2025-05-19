@@ -115,11 +115,14 @@ def main():
     criterion = nn.BCEWithLogitsLoss()
 
     #change here if we want to train the entire network
-    for p in resnet34.parameters():
-        p.requires_grad = False
+    # for p in resnet34.parameters():
+    #     p.requires_grad = False
 
-    resnet34.fc = nn.Linear(num_ftrs, 1)
-    optimizer = optim.Adam(resnet34.fc.parameters(), lr=1e-4)
+    # resnet34.fc = nn.Linear(num_ftrs, 1)
+    # optimizer = optim.Adam(resnet34.fc.parameters(), lr=1e-4)
+
+
+    optimizer = optim.Adam(resnet34.parameters(), lr=1e-4)
 
     def accuracy(outputs, labels):
         preds = (torch.sigmoid(outputs) > 0.5).float()

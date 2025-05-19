@@ -14,12 +14,12 @@ from tqdm import tqdm
 import numpy as np
 
 
-# what we choose here doenst matter
-# STRATEGY = 'gradual'
+# Configuration
 STRATEGY = "simultaneous"
 BLOCK_RANGE = (1, 3)  # Min and max values inclusive (max 3 blocks in ResNet34 layer4)
 EPOCHS = 1  # For demonstration; increase for real training
 BATCH_SIZE = 32
+UNFREEZE_BN = True  # Whether to unfreeze batch norm parameters
 
 # Logging setup
 LOG_DIR = "logs"
@@ -33,7 +33,7 @@ PLOT_PREFIX = f"stage2-multiclass-{pretty_timestamp}"
 
 def log(msg):
     msg = str(msg)
-    print(msg)
+    # print(msg)
     with open(LOG_FILE, "a") as f:
         f.write(msg + "\n")
 
@@ -41,6 +41,12 @@ def log(msg):
 class PetBreedDataset(Dataset):
     def __init__(self, data_dir, split_file, indices=None):
         self.img_dir = os.path.join(data_dir, "images")
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                              std=[0.229, 0.224, 0.225])
+        ])
         self.samples = []  # list of (img_path, label)
         with open(split_file) as f:
             for line in f:
@@ -52,7 +58,6 @@ class PetBreedDataset(Dataset):
                 self.samples.append((f"{name}.jpg", label))
         if indices is not None:
             self.samples = [self.samples[i] for i in indices]
-        # We'll handle transformations directly in __getitem__ to avoid errors
 
     def __len__(self):
         return len(self.samples)
@@ -61,34 +66,16 @@ class PetBreedDataset(Dataset):
         fname, label = self.samples[idx]
         try:
             img_path = os.path.join(self.img_dir, fname)
-            if not os.path.exists(img_path):
-                raise FileNotFoundError(f"Image file not found: {img_path}")
-                
-            # Create a simpler transformation pipeline to avoid numpy errors
             img = Image.open(img_path).convert("RGB")
-            img = img.resize((224, 224))
-            img = np.array(img) / 255.0  # Normalize to [0,1]
-            img = img.transpose(2, 0, 1)  # HWC -> CHW format
-            img = torch.FloatTensor(img)  # Convert to tensor
-            
-            # Apply mean/std normalization
-            mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-            std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-            img = (img - mean) / std
-            
+            img = self.transform(img)
             return img, label
         except Exception as e:
             print(f"Error loading image {fname}: {e}")
-            # Create a dummy tensor as fallback
             return torch.zeros((3, 224, 224)), label
 
-
-def set_parameter_requires_grad(model, num_blocks, strategy):
-    """Set which parameters require gradient computation.
-    For simultaneous strategy: unfreeze classifier and specified number of blocks in layer4.
-    For gradual strategy: see training loop implementation.
-    """
-    # Freeze all layers
+def set_parameter_requires_grad(model, num_blocks, strategy, unfreeze_bn=UNFREEZE_BN):
+    """Set which parameters require gradient computation."""
+    # First, freeze all parameters
     for param in model.parameters():
         param.requires_grad = False
         
@@ -96,6 +83,18 @@ def set_parameter_requires_grad(model, num_blocks, strategy):
     for param in model.fc.parameters():
         param.requires_grad = True
         
+    # Unfreeze batch norm parameters across all layers if requested
+    if unfreeze_bn:
+        for module in model.modules():
+            if isinstance(module, nn.BatchNorm2d):
+                # Unfreeze the learnable parameters (gamma and beta)
+                module.weight.requires_grad = True  # gamma
+                module.bias.requires_grad = True    # beta
+                # Enable tracking of running statistics
+                module.track_running_stats = True
+                module.momentum = 0.1  # Adjust momentum for faster adaptation
+        log("Batch normalization parameters unfrozen across all layers")
+    
     if strategy == 'simultaneous':
         # Unfreeze the last N blocks of layer4
         max_blocks = len(model.layer4)
@@ -109,22 +108,19 @@ def set_parameter_requires_grad(model, num_blocks, strategy):
             blocks_unfrozen.append(block_idx)
             
         log(f"Unfrozen blocks in layer4: {sorted(blocks_unfrozen)}")
-    else:
-        # For gradual strategy, handled in the training loop
-        pass
 
 def accuracy(outputs, labels):
     preds = torch.argmax(outputs, dim=1)
     return (preds == labels).float().mean().item()
 
-
 def main():
-    
     DATA_DIR = "dataset/oxford-iiit-pet"
     TRAIN_FILE = os.path.join(DATA_DIR, "annotations", "trainval.txt")
-    # Split trainval.txt into train/val indices
+    
+    # Load and split data
     with open(TRAIN_FILE) as f:
         lines = [line for line in f if len(line.strip().split()) >= 4]
+    
     n_total = len(lines)
     indices = list(range(n_total))
     random.seed(42)
@@ -132,35 +128,28 @@ def main():
     split = int(0.9 * n_total)
     train_indices = indices[:split]
     val_indices = indices[split:]
-    # Quick-test: use only 10% of training data
-    # num_quick = max(1, len(train_indices) // 5)
-    # train_indices = train_indices[:num_quick]
     
-    # Datasets and loaders
+    # Create datasets and loaders
     train_ds = PetBreedDataset(DATA_DIR, TRAIN_FILE, indices=train_indices)
-    train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
-    
-    # Validation dataset and loaders
     val_ds = PetBreedDataset(DATA_DIR, TRAIN_FILE, indices=val_indices)
+    
+    train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
     val_dl = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
-    # Create a separate validation loader for iteration tracking with shuffling enabled
     val_iter_dl = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
 
-    # Device selection: CUDA > MPS > CPU
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+    # Device selection
+    device = torch.device("cuda" if torch.cuda.is_available() else 
+                         "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() 
+                         else "cpu")
 
     log(f"[Telemetry] Number of training samples: {len(train_ds)}")
     log(f"[Telemetry] Number of validation samples: {len(val_ds)}")
     log(f"[Telemetry] Batch size: {BATCH_SIZE}")
     log(f"[Telemetry] Using device: {device}")
     log(f"[Telemetry] Strategy: {STRATEGY}")
+    log(f"[Telemetry] Batch norm unfreezing: {UNFREEZE_BN}")
     
-    # Initialize the model
+    # Initialize model
     resnet34 = models.resnet34(weights="IMAGENET1K_V1")
     num_ftrs = resnet34.fc.in_features
     resnet34.fc = nn.Linear(num_ftrs, 37)  # 37 breeds
@@ -180,9 +169,27 @@ def main():
     # Initialize the model with all layers frozen except the classifier
     set_parameter_requires_grad(resnet34, 0, 'gradual')
     
-    # Initialize optimizer with only the classifier parameters
+    # Initialize optimizer with different learning rates for batch norm
+    if UNFREEZE_BN:
+        # Separate parameters into batch norm and non-batch norm
+        bn_params = []
+        other_params = []
+        
+        for name, param in resnet34.named_parameters():
+            if param.requires_grad:
+                if 'bn' in name or 'BatchNorm' in name:
+                    bn_params.append(param)
+                else:
+                    other_params.append(param)
+        
+        optimizer = optim.Adam([
+            {'params': other_params, 'lr': 1e-4},
+            {'params': bn_params, 'lr': 1e-5}
+        ])
+    else:
+        optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
+    
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
     
     # For plotting
     train_losses, train_accs = [], []
@@ -216,6 +223,14 @@ def main():
                 for param in resnet34.parameters():
                     param.requires_grad = False
                 
+                # Re-unfreeze batch norm parameters if enabled
+                if UNFREEZE_BN:
+                    for module in resnet34.modules():
+                        if isinstance(module, nn.BatchNorm2d):
+                            module.weight.requires_grad = True
+                            module.bias.requires_grad = True
+                            module.track_running_stats = True
+                
                 # Unfreeze classifier and required blocks in layer4
                 for param in resnet34.fc.parameters():
                     param.requires_grad = True
@@ -229,7 +244,24 @@ def main():
                 log(f"Progress: {progress*100:.1f}% - Unfrozen {target_blocks} blocks in layer4")
                 
                 # Update optimizer with new trainable parameters
-                optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
+                if UNFREEZE_BN:
+                    # Separate parameters into batch norm and non-batch norm
+                    bn_params = []
+                    other_params = []
+                    
+                    for name, param in resnet34.named_parameters():
+                        if param.requires_grad:
+                            if 'bn' in name or 'BatchNorm' in name:
+                                bn_params.append(param)
+                            else:
+                                other_params.append(param)
+                    
+                    optimizer = optim.Adam([
+                        {'params': other_params, 'lr': 1e-4},
+                        {'params': bn_params, 'lr': 1e-5}
+                    ])
+                else:
+                    optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
             
             # Training step
             imgs, labels = imgs.to(device), labels.to(device)
@@ -238,6 +270,7 @@ def main():
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+            
             # Update metrics
             train_loss += loss.item() * imgs.size(0)
             train_acc += accuracy(outputs, labels) * imgs.size(0)
@@ -252,13 +285,12 @@ def main():
                 # Get validation metrics (sample a random batch)
                 resnet34.eval()
                 with torch.no_grad():
-                    # Sample from the validation loader with shuffling for better representation
                     val_imgs, val_labels = next(iter(val_iter_dl))
                     val_imgs, val_labels = val_imgs.to(device), val_labels.to(device)
                     val_outputs = resnet34(val_imgs)
                     val_batch_loss = criterion(val_outputs, val_labels)
                     val_batch_acc = accuracy(val_outputs, val_labels)
-                resnet34.train()  # Switch back to training mode
+                resnet34.train()
                 
                 # Store metrics
                 iter_train_losses.append(curr_train_loss)
@@ -269,6 +301,12 @@ def main():
                 
                 # Log metrics
                 log(f"[Epoch {epoch+1}][Iter {batch_idx+1}] Train Loss: {curr_train_loss:.4f} | Train Acc: {curr_train_acc:.4f} | Val Loss: {val_batch_loss.item():.4f} | Val Acc: {val_batch_acc:.4f}")
+                
+                # Log batch norm statistics if enabled
+                if UNFREEZE_BN and (batch_idx) % 50 == 0:
+                    for name, module in resnet34.named_modules():
+                        if isinstance(module, nn.BatchNorm2d):
+                            log(f"BN {name} - Mean: {module.running_mean.mean():.4f}, Var: {module.running_var.mean():.4f}")
             
             if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(train_dl):
                 log(f"[Epoch {epoch+1}] Batch {batch_idx+1}/{len(train_dl)} | Blocks: {resnet34.current_blocks} | Loss: {loss.item():.4f} | Acc: {accuracy(outputs, labels):.4f}")
@@ -298,7 +336,7 @@ def main():
         
         log(f"[Telemetry] Epoch {epoch+1} | Train Loss: {epoch_loss:.4f} | Train Acc: {epoch_acc:.4f} | Val Loss: {val_epoch_loss:.4f} | Val Acc: {val_epoch_acc:.4f}")
 
-    # Evaluate final validation metrics after all epochs
+    # Evaluate final validation metrics
     resnet34.eval()
     with torch.no_grad():
         final_val_loss, final_val_acc, val_total = 0, 0, 0
@@ -325,13 +363,12 @@ def main():
     all_val_losses = val_losses
     all_val_accs = val_accs
 
-    # Plot combined training and validation loss with block unfreezing markers
+    # Plot results (keeping all the existing plotting code)
     plt.figure(figsize=(10, 6))
     plt.plot(all_iter_steps, all_iter_train_losses, color='blue', linestyle='-', label='Training')
     plt.plot(all_iter_steps, all_iter_val_losses, color='red', linestyle='--', label='Validation')
     
     # Mark when blocks were unfrozen
-    # total_steps = len(all_iter_steps)
     total_steps = int(len(train_ds)/BATCH_SIZE)
     unfreeze_points = [(total_steps // 3, 'darkgreen', '2 blocks'), (2 * total_steps // 3, 'purple', '3 blocks')]
     for step, color, label in unfreeze_points:
@@ -345,7 +382,7 @@ def main():
     plt.savefig(loss_plot_path)
     plt.close()
     
-    # Plot combined training and validation accuracy
+    # Plot accuracies
     plt.figure(figsize=(10, 6))
     plt.plot(all_iter_steps, all_iter_train_accs, color='green', linestyle='-', label='Training')
     plt.plot(all_iter_steps, all_iter_val_accs, color='purple', linestyle='--', label='Validation')
@@ -362,42 +399,18 @@ def main():
     plt.savefig(acc_plot_path)
     plt.close()
     
-    # Create combined train vs validation loss plot
-    plt.figure(figsize=(12, 8))
-    epochs = range(1, len(all_train_losses) + 1)
-    plt.plot(epochs, all_train_losses, color='blue', marker='o', linestyle='-', label='Train')
-    plt.plot(epochs, all_val_losses, color='red', marker='s', linestyle='--', label='Validation')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training vs Validation Loss per Epoch')
-    plt.legend()
-    train_val_loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-gradual-train-vs-val-loss.png")
-    plt.savefig(train_val_loss_plot_path)
-    plt.close()
-    
-    # Create combined train vs validation accuracy plot
-    plt.figure(figsize=(12, 8))
-    plt.plot(epochs, all_train_accs, color='green', marker='o', linestyle='-', label='Train')
-    plt.plot(epochs, all_val_accs, color='purple', marker='s', linestyle='--', label='Validation')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.title('Training vs Validation Accuracy per Epoch')
-    plt.legend()
-    train_val_acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-gradual-train-vs-val-acc.png")
-    plt.savefig(train_val_acc_plot_path)
-    plt.close()
-    
-    # Append to raw-results.md
+    # Save results
     with open(RAW_RESULTS, "a") as f:
         f.write(f"\n\n## Stage 2 Multi-class Classification with Gradual Unfreezing ({pretty_timestamp})\n")
-        f.write(f"### Training vs Validation Loss per Iteration (Gradual Unfreezing)\n")
+        f.write(f"### Training Configuration\n")
+        f.write(f"- Strategy: {STRATEGY}\n")
+        f.write(f"- Batch norm unfreezing: {UNFREEZE_BN}\n")
+        f.write(f"- Epochs: {EPOCHS}\n")
+        f.write(f"- Batch size: {BATCH_SIZE}\n\n")
+        f.write(f"### Training vs Validation Loss per Iteration\n")
         f.write(f"![](./{os.path.relpath(loss_plot_path, os.getcwd())})\n\n")
-        f.write(f"### Training vs Validation Accuracy per Iteration (Gradual Unfreezing)\n")
+        f.write(f"### Training vs Validation Accuracy per Iteration\n")
         f.write(f"![](./{os.path.relpath(acc_plot_path, os.getcwd())})\n\n")
-        f.write(f"### Training vs Validation Loss per Epoch (Gradual Unfreezing)\n")
-        f.write(f"![](./{os.path.relpath(train_val_loss_plot_path, os.getcwd())})\n\n")
-        f.write(f"### Training vs Validation Accuracy per Epoch (Gradual Unfreezing)\n")
-        f.write(f"![](./{os.path.relpath(train_val_acc_plot_path, os.getcwd())})\n\n")
         f.write(f"\n**Final Validation Metrics:**\n\n")
         f.write(f"- Loss: {final_val_loss:.4f}\n")
         f.write(f"- Accuracy: {final_val_acc:.4f}\n\n")

@@ -37,10 +37,40 @@ def log(msg):
     with open(LOG_FILE, "a") as f:
         f.write(msg + "\n")
 
+# Define different data augmentation strategies
+def get_transforms(augmentation_strategy='none'):
+    if augmentation_strategy == 'none':
+        return transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    elif augmentation_strategy == 'Less':
+        return transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(10),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    elif augmentation_strategy == 'More':
+        return transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(15),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+            transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    else:
+        raise ValueError(f"Unknown augmentation strategy: {augmentation_strategy}")
+
 # Custom Dataset for multi-class classification (breed recognition)
 class PetBreedDataset(Dataset):
-    def __init__(self, data_dir, split_file, indices=None):
+    def __init__(self, data_dir, split_file, indices=None, transform=None):
         self.img_dir = os.path.join(data_dir, "images")
+        self.transform = transform
         self.samples = []  # list of (img_path, label)
         with open(split_file) as f:
             for line in f:
@@ -63,25 +93,24 @@ class PetBreedDataset(Dataset):
             img_path = os.path.join(self.img_dir, fname)
             if not os.path.exists(img_path):
                 raise FileNotFoundError(f"Image file not found: {img_path}")
-                
-            # Create a simpler transformation pipeline to avoid numpy errors
-            img = Image.open(img_path).convert("RGB")
-            img = img.resize((224, 224))
-            img = np.array(img) / 255.0  # Normalize to [0,1]
-            img = img.transpose(2, 0, 1)  # HWC -> CHW format
-            img = torch.FloatTensor(img)  # Convert to tensor
             
-            # Apply mean/std normalization
-            mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-            std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-            img = (img - mean) / std
+            img = Image.open(img_path).convert("RGB")
+            if self.transform:
+                img = self.transform(img)
+            else:
+                # Fallback to basic transforms if none provided
+                img = img.resize((224, 224))
+                img = np.array(img) / 255.0
+                img = img.transpose(2, 0, 1)
+                img = torch.FloatTensor(img)
+                mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+                std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+                img = (img - mean) / std
             
             return img, label
         except Exception as e:
             print(f"Error loading image {fname}: {e}")
-            # Create a dummy tensor as fallback
             return torch.zeros((3, 224, 224)), label
-
 
 def set_parameter_requires_grad(model, num_blocks, strategy):
     """Set which parameters require gradient computation.
@@ -117,11 +146,13 @@ def accuracy(outputs, labels):
     preds = torch.argmax(outputs, dim=1)
     return (preds == labels).float().mean().item()
 
-
-def main():
+def train_model(augmentation_strategy='none', l2_weight=0.0):
+    """Train the model with specified augmentation strategy and L2 regularization weight"""
+    log(f"\n[Experiment] Starting training with augmentation={augmentation_strategy}, L2 weight={l2_weight}")
     
     DATA_DIR = "dataset/oxford-iiit-pet"
     TRAIN_FILE = os.path.join(DATA_DIR, "annotations", "trainval.txt")
+    
     # Split trainval.txt into train/val indices
     with open(TRAIN_FILE) as f:
         lines = [line for line in f if len(line.strip().split()) >= 4]
@@ -132,21 +163,20 @@ def main():
     split = int(0.9 * n_total)
     train_indices = indices[:split]
     val_indices = indices[split:]
-    # Quick-test: use only 10% of training data
-    # num_quick = max(1, len(train_indices) // 5)
-    # train_indices = train_indices[:num_quick]
+    
+    # Get transforms for training and validation
+    train_transform = get_transforms(augmentation_strategy)
+    val_transform = get_transforms('none')  # No augmentation for validation
     
     # Datasets and loaders
-    train_ds = PetBreedDataset(DATA_DIR, TRAIN_FILE, indices=train_indices)
+    train_ds = PetBreedDataset(DATA_DIR, TRAIN_FILE, indices=train_indices, transform=train_transform)
     train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
     
-    # Validation dataset and loaders
-    val_ds = PetBreedDataset(DATA_DIR, TRAIN_FILE, indices=val_indices)
+    val_ds = PetBreedDataset(DATA_DIR, TRAIN_FILE, indices=val_indices, transform=val_transform)
     val_dl = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
-    # Create a separate validation loader for iteration tracking with shuffling enabled
     val_iter_dl = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
 
-    # Device selection: CUDA > MPS > CPU
+    # Device selection
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -180,18 +210,19 @@ def main():
     # Initialize the model with all layers frozen except the classifier
     set_parameter_requires_grad(resnet34, 0, 'gradual')
     
-    # Initialize optimizer with only the classifier parameters
+    # Initialize optimizer with L2 regularization
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
+    optimizer = optim.Adam(
+        filter(lambda p: p.requires_grad, resnet34.parameters()),
+        lr=1e-4,
+        weight_decay=l2_weight  # L2 regularization
+    )
     
     # For plotting
     train_losses, train_accs = [], []
     val_losses, val_accs = [], []
     iter_steps, iter_train_losses, iter_train_accs = [], [], []
     iter_val_losses, iter_val_accs = [], []
-    
-    # Track the current number of unfrozen blocks
-    current_unfrozen_blocks = 0
     
     log("\n[Telemetry] Starting training with gradual unfreezing")
 
@@ -229,7 +260,11 @@ def main():
                 log(f"Progress: {progress*100:.1f}% - Unfrozen {target_blocks} blocks in layer4")
                 
                 # Update optimizer with new trainable parameters
-                optimizer = optim.Adam(filter(lambda p: p.requires_grad, resnet34.parameters()), lr=1e-4)
+                optimizer = optim.Adam(
+                    filter(lambda p: p.requires_grad, resnet34.parameters()),
+                    lr=1e-4,
+                    weight_decay=l2_weight
+                )
             
             # Training step
             imgs, labels = imgs.to(device), labels.to(device)
@@ -238,6 +273,7 @@ def main():
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+            
             # Update metrics
             train_loss += loss.item() * imgs.size(0)
             train_acc += accuracy(outputs, labels) * imgs.size(0)
@@ -252,13 +288,12 @@ def main():
                 # Get validation metrics (sample a random batch)
                 resnet34.eval()
                 with torch.no_grad():
-                    # Sample from the validation loader with shuffling for better representation
                     val_imgs, val_labels = next(iter(val_iter_dl))
                     val_imgs, val_labels = val_imgs.to(device), val_labels.to(device)
                     val_outputs = resnet34(val_imgs)
                     val_batch_loss = criterion(val_outputs, val_labels)
                     val_batch_acc = accuracy(val_outputs, val_labels)
-                resnet34.train()  # Switch back to training mode
+                resnet34.train()
                 
                 # Store metrics
                 iter_train_losses.append(curr_train_loss)
@@ -267,7 +302,6 @@ def main():
                 iter_val_accs.append(val_batch_acc)
                 iter_steps.append(epoch * len(train_dl) + batch_idx + 1)
                 
-                # Log metrics
                 log(f"[Epoch {epoch+1}][Iter {batch_idx+1}] Train Loss: {curr_train_loss:.4f} | Train Acc: {curr_train_acc:.4f} | Val Loss: {val_batch_loss.item():.4f} | Val Acc: {val_batch_acc:.4f}")
             
             if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(train_dl):
@@ -298,7 +332,7 @@ def main():
         
         log(f"[Telemetry] Epoch {epoch+1} | Train Loss: {epoch_loss:.4f} | Train Acc: {epoch_acc:.4f} | Val Loss: {val_epoch_loss:.4f} | Val Acc: {val_epoch_acc:.4f}")
 
-    # Evaluate final validation metrics after all epochs
+    # Evaluate final validation metrics
     resnet34.eval()
     with torch.no_grad():
         final_val_loss, final_val_acc, val_total = 0, 0, 0
@@ -325,13 +359,15 @@ def main():
     all_val_losses = val_losses
     all_val_accs = val_accs
 
-    # Plot combined training and validation loss with block unfreezing markers
+    # Plot results
+    exp_name = f"aug_{augmentation_strategy}_l2_{l2_weight}"
+    
+    # Plot combined training and validation loss
     plt.figure(figsize=(10, 6))
     plt.plot(all_iter_steps, all_iter_train_losses, color='blue', linestyle='-', label='Training')
     plt.plot(all_iter_steps, all_iter_val_losses, color='red', linestyle='--', label='Validation')
     
     # Mark when blocks were unfrozen
-    # total_steps = len(all_iter_steps)
     total_steps = int(len(train_ds)/BATCH_SIZE)
     unfreeze_points = [(total_steps // 3, 'darkgreen', '2 blocks'), (2 * total_steps // 3, 'purple', '3 blocks')]
     for step, color, label in unfreeze_points:
@@ -339,9 +375,9 @@ def main():
     
     plt.xlabel('Iteration')
     plt.ylabel('Loss')
-    plt.title('Training vs Validation Loss with Gradual Unfreezing')
+    plt.title(f'Training vs Validation Loss ({exp_name})')
     plt.legend()
-    loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-gradual-loss-combined.png")
+    loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-{exp_name}-loss.png")
     plt.savefig(loss_plot_path)
     plt.close()
     
@@ -350,61 +386,58 @@ def main():
     plt.plot(all_iter_steps, all_iter_train_accs, color='green', linestyle='-', label='Training')
     plt.plot(all_iter_steps, all_iter_val_accs, color='purple', linestyle='--', label='Validation')
     
-    # Add same vertical markers
     for step, color, label in unfreeze_points:
         plt.axvline(x=step, color=color, linestyle='--', alpha=0.5, label=f'Unfreeze {label}')
     
     plt.xlabel('Iteration')
     plt.ylabel('Accuracy')
-    plt.title('Training vs Validation Accuracy with Gradual Unfreezing')
+    plt.title(f'Training vs Validation Accuracy ({exp_name})')
     plt.legend()
-    acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-gradual-acc-combined.png")
+    acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-{exp_name}-acc.png")
     plt.savefig(acc_plot_path)
     plt.close()
     
-    # Create combined train vs validation loss plot
-    plt.figure(figsize=(12, 8))
-    epochs = range(1, len(all_train_losses) + 1)
-    plt.plot(epochs, all_train_losses, color='blue', marker='o', linestyle='-', label='Train')
-    plt.plot(epochs, all_val_losses, color='red', marker='s', linestyle='--', label='Validation')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training vs Validation Loss per Epoch')
-    plt.legend()
-    train_val_loss_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-gradual-train-vs-val-loss.png")
-    plt.savefig(train_val_loss_plot_path)
-    plt.close()
+    return {
+        'final_val_loss': final_val_loss,
+        'final_val_acc': final_val_acc,
+        'loss_plot_path': loss_plot_path,
+        'acc_plot_path': acc_plot_path
+    }
+
+def main():
+    # Define experiments
+    experiments = [
+        {'augmentation': 'none', 'l2_weight': 0.0},  # Baseline
+        {'augmentation': 'Less', 'l2_weight': 0.0},  # Basic augmentation
+        {'augmentation': 'More', 'l2_weight': 0.0},  # Advanced augmentation
+        {'augmentation': 'Less', 'l2_weight': 0.0001},  # Basic augmentation + L2
+        {'augmentation': 'More', 'l2_weight': 0.0001},  # Advanced augmentation + L2
+    ]
     
-    # Create combined train vs validation accuracy plot
-    plt.figure(figsize=(12, 8))
-    plt.plot(epochs, all_train_accs, color='green', marker='o', linestyle='-', label='Train')
-    plt.plot(epochs, all_val_accs, color='purple', marker='s', linestyle='--', label='Validation')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.title('Training vs Validation Accuracy per Epoch')
-    plt.legend()
-    train_val_acc_plot_path = os.path.join(PLOT_DIR, f"{PLOT_PREFIX}-gradual-train-vs-val-acc.png")
-    plt.savefig(train_val_acc_plot_path)
-    plt.close()
+    results = []
+    for exp in experiments:
+        result = train_model(
+            augmentation_strategy=exp['augmentation'],
+            l2_weight=exp['l2_weight']
+        )
+        results.append({
+            'augmentation': exp['augmentation'],
+            'l2_weight': exp['l2_weight'],
+            **result
+        })
     
-    # Append to raw-results.md
+    # Write results to raw-results.md
     with open(RAW_RESULTS, "a") as f:
-        f.write(f"\n\n## Stage 2 Multi-class Classification with Gradual Unfreezing ({pretty_timestamp})\n")
-        f.write(f"### Training vs Validation Loss per Iteration (Gradual Unfreezing)\n")
-        f.write(f"![](./{os.path.relpath(loss_plot_path, os.getcwd())})\n\n")
-        f.write(f"### Training vs Validation Accuracy per Iteration (Gradual Unfreezing)\n")
-        f.write(f"![](./{os.path.relpath(acc_plot_path, os.getcwd())})\n\n")
-        f.write(f"### Training vs Validation Loss per Epoch (Gradual Unfreezing)\n")
-        f.write(f"![](./{os.path.relpath(train_val_loss_plot_path, os.getcwd())})\n\n")
-        f.write(f"### Training vs Validation Accuracy per Epoch (Gradual Unfreezing)\n")
-        f.write(f"![](./{os.path.relpath(train_val_acc_plot_path, os.getcwd())})\n\n")
-        f.write(f"\n**Final Validation Metrics:**\n\n")
-        f.write(f"- Loss: {final_val_loss:.4f}\n")
-        f.write(f"- Accuracy: {final_val_acc:.4f}\n\n")
-        f.write(f"\n**Training Log:**\n\n")
-        with open(LOG_FILE) as logf:
-            for line in logf:
-                f.write(line)
+        f.write(f"\n\n## Stage 2 Multi-class Classification with Data Augmentation and L2 Regularization ({pretty_timestamp})\n")
+        
+        for result in results:
+            f.write(f"\n### Experiment: augmentation={result['augmentation']}, L2 weight={result['l2_weight']}\n")
+            f.write(f"Final Validation Loss: {result['final_val_loss']:.4f}\n")
+            f.write(f"Final Validation Accuracy: {result['final_val_acc']:.4f}\n")
+            f.write(f"\nTraining vs Validation Loss:\n")
+            f.write(f"![](./{os.path.relpath(result['loss_plot_path'], os.getcwd())})\n\n")
+            f.write(f"Training vs Validation Accuracy:\n")
+            f.write(f"![](./{os.path.relpath(result['acc_plot_path'], os.getcwd())})\n\n")
 
 if __name__ == "__main__":
     main()
